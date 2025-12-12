@@ -1069,7 +1069,7 @@ exports.config = {
             bomViewName : 'Basic'
         },
         workspaceItemVariants : {
-            workspaceId       : 571,
+            workspaceId       : 274,
             sectionLabel      : 'Variant Definition',
             fieldIds          : {
                 baseItem      : 'BASE_ITEM',
