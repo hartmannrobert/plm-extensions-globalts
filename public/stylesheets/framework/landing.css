@@ -57,7 +57,7 @@
     left            : calc(var(--width-side) + 160px);
 }
 
-body > div { transition  : all ease 0.2s; }
+body > div { transition : none; }
 
 body.no-side-panel #toggle,
 body.no-side-panel #layout,
@@ -68,25 +68,25 @@ body.no-side-panel #main   { left : 34px; }
 body.layout-tiles-list .tiles-group-list {
     flex-wrap      : unset;
     flex-direction : column;
-    gap            : 8px;
+    gap            : 2px;
 }
 body.layout-tiles-list .tile.min {
     flex-direction : row;
-    height         : 116px;
+    height         : 104px;
     min-width      : unset;
     width          : unset;
 }
 body.layout-tiles-list .tile.min .tile-image {
-    min-width : 204px;
-    width     : 204px;    
+    min-width : 184px;
+    width     : 184px;    
 }
 body.layout-tiles-list .tile.min .tile-title {
     font-size   : 18px;
     line-height : 24px;
 }
 body.layout-tiles-list .tile.min .tile-details {
-    gap    : 4px;
-    margin : 12px 24px; 
+    gap    : 2px;
+    margin : 12px 12px 12px 24px; 
     width  : 100%;
 }
 body.layout-tiles-list .tile.min .tile-subtitle {
@@ -100,6 +100,15 @@ body.layout-tiles-list .tile.min .tile-access {
     min-height : 38px;
     height     : 38px;
 }
+body.layout-tiles-list .tile.min .tile-access .tile-endpoint {
+    height      : 30px;
+    line-height : 30px;    
+}
+body.layout-tiles-list .tile.min .tile-access .button {
+    height      : 28px;
+    line-height : 28px;
+    padding     : 0px 16px;
+}
 
 
 /*  SIDE PANEL */
@@ -112,10 +121,27 @@ body.layout-tiles-list .tile.min .tile-access {
     margin-bottom   : 12px;
     padding         : 18px; 
 }
+#side p {
+    margin : 20px 0px;
+}
 .side-toolbar {
     display         : flex;
     flex-direction  : column;
     gap             : 6px;
+}
+#side-toolbar {
+    display : grid;
+    gap     : 4px;
+    grid-template-columns: 1fr 1fr;
+}
+#side-toolbar > div {
+    height      : 40px;
+    padding     : 6px 12px;
+    white-space : normal;
+}
+#side-toolbar > div > span {
+    display : block;
+    color   : var(--color-blue-500);
 }
 #themes {
     display         : flex;
@@ -155,7 +181,12 @@ body.layout-tiles-list .tile.min .tile-access {
     padding         : 0px;
     gap             : 0px;
 }
+.tiles-group.first {
+    padding-top: 16px;
+}
 .tiles-group-title {
+    font-weight  : 800;
+    font-size    : 20px;
     padding-left : 10px;
 }
 .tiles-group-subtitle {
@@ -165,33 +196,33 @@ body.layout-tiles-list .tile.min .tile-access {
 .tiles-group-list {
     display     : flex;
     flex-wrap   : wrap;
-    gap         : 20px;
+    gap         : 8px;
     padding-top : 10px;
 }
-
+.surface-level-1 .tiles-group-title { background : none; }
 
 
 /*  TILES */
 /* ----------------------------------------------------------------------------- */
 .tile {
-    background      : var(--color-surface-level-3);
-    display         : flex;
-    flex-direction  : column;
-    height          : 460px;
+    background     : var(--color-surface-level-2);
+    display        : flex;
+    flex-direction : column;
+    height         : 420px;
 }
 .tile-image {
-    max-height  : 226px;
-    min-height  : 226px;
-    height      : 226px;
+    max-height : 192px;
+    min-height : 192px;
+    height     : 192px;
 }
 .tile,
 .tile-image {
-    min-width : 400px;
-    width     : 400px;
+    min-width : 340px;
+    width     : 340px;
 }
 .tile-details {
     gap     : 10px;
-    margin  : 20px 40px;
+    margin  : 16px 28px;
 }
 .tile-title { 
     font-size   : 20px;
@@ -200,7 +231,7 @@ body.layout-tiles-list .tile.min .tile-access {
 }
 .tile-subtitle {     
     font-size   : 12px;
-    height      : 80px;
+    height      : 90px;
     line-height : 16px;
     white-space : wrap !important;
 }
@@ -250,6 +281,10 @@ body.layout-tiles-list .tile.min .tile-access {
 .tile.max .tile-image {
     border              : 30px solid var(--color-surface-level-2);
     border-left-width   : 60px;
+    max-width           : 400px;
+    min-width           : 400px;
+    max-height          : 226px;
+    min-height          : 226px;
     position            : absolute;
     top                 : 0px;
     left                : 0px;
@@ -425,20 +460,6 @@ a:hover {
 
 
 
-/*  TENANT */
-/* ----------------------------------------------------------------------------- */
-#tenant-name {
-    color       : var(--color-blue-500);
-}
-
-
-/*  CHROME EXTENSION */
-/* ----------------------------------------------------------------------------- */
-#chrome-extension {
-    color       : var(--color-blue-500);
-}
-
-
 /*  DOCS */
 /* ----------------------------------------------------------------------------- */
 #docs-name {
@@ -449,9 +470,6 @@ a:hover {
 
 /*  CHANGE LOG */
 /* ----------------------------------------------------------------------------- */
-#version-name {
-    color       : var(--color-blue-500);
-}
 #framework-changes { 
     background  : var(--color-surface-level-2);
     color       : var(--color-font);

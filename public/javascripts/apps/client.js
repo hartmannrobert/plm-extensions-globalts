@@ -1364,7 +1364,7 @@ function performTransition(link, transition) {
 
     $('#overlay').show();
 
-    $.get('/plm/transition', { 'link' : link, 'transition' : transition, 'comment' : 'Performed on mobile client' }, function(response) {
+    $.post('/plm/transition', { 'link' : link, 'transition' : transition, 'comment' : 'Performed on mobile client' }, function(response) {
         console.log(response);
         $('#overlay').hide();
         openItem(link);

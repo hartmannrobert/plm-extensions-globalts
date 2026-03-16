@@ -1,5 +1,3 @@
-let urlParameters = getURLParameters();
-
 let paramsSummary = {
     id       : 'summary',
     contents : [ { 
@@ -31,16 +29,20 @@ let paramsSummary = {
 $(document).ready(function() {
     
     setUIEvents();
-    insertMenu();
+    setAddinEvents();
+    setAddinMode();
+
+    if(!isAddin) insertMenu();
 
     if(urlParameters.link === '') {
 
         $('#toggle-classes').removeClass('hidden');
 
         insertClasses({
+            contentSize      : (isAddin) ? 's' : 'm',
             collapseContents : true,
-            counters         : true,
-            path             : true,
+            counters         : (!isAddin),
+            path             : (!isAddin),
             reset            : true,
             search           : true,
             toggles          : true,
@@ -86,7 +88,7 @@ $(document).ready(function() {
                 reset             : true,
                 search            : true,
                 openInPLM         : true,
-                fields            : config.classes.fieldsIncluded,
+                fields            : config.fieldsIncluded,
                 referenceItem     : responses[0].data,
                 referenceData     : data,
                 onClickItem       : function(elemClicked) { clickClassItem(elemClicked); }
@@ -94,7 +96,8 @@ $(document).ready(function() {
 
             insertClassFilters(classId, className, {
                 id         : 'filters',
-                idContents : 'contents'
+                idContents : 'contents',
+                advanced   : false
             });
 
             insertItemSummary(urlParameters.link, paramsSummary);
@@ -113,10 +116,24 @@ function setUIEvents() {
         $(this).toggleClass('toggle-on').toggleClass('toggle-off');
         $('body').toggleClass('no-classes');
     })
+    $('#toggle-filters').click(function() {
+        $(this).toggleClass('toggle-on').toggleClass('toggle-off');
+        $('body').toggleClass('no-filters');
+    })
     $('#toggle-summary').click(function() {
         $(this).toggleClass('toggle-on').toggleClass('toggle-off');
         $('body').toggleClass('no-summary');
     })
+
+}
+
+function setAddinMode() {
+
+    isAddin = (!isBlank(urlParameters.host));
+
+    if(!isAddin) return;
+
+    $('body').addClass('addin');
 
 }
 
@@ -131,18 +148,22 @@ function selectClass(elemClicked) {
     insertClassContents(classId, className, {
         id                : 'contents',
         headerLabel       : path.path,
+        singleToolbar     : 'actions',
+        contentSize       : (isAddin) ? 'xxs' : 'm',
         filterByStatus    : true,
         filterByWorkspace : true,
         reset             : true,
         search            : true,
         openInPLM         : true,
-        fields            : config.classes.fieldsIncluded,
+        fields            : config.fieldsIncluded,
         onClickItem       : function(elemClicked) { clickClassItem(elemClicked); }
     });
 
     insertClassFilters(classId, className, {
-        id         : 'filters',
-        idContents : 'contents'
+        id            : 'filters',
+        idContents    : 'contents',
+        singleToolbar : 'controls',
+        advanced      : false
     });
 
 }

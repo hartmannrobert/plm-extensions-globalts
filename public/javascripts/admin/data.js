@@ -1477,7 +1477,7 @@ function genRequests(limit) {
 
             } else if(run.actionId === 'export-attachments') {
 
-                params.folder       = $('#workspace').children('option:selected').html() + ' Files';
+                params.subFolder    = $('#workspace').children('option:selected').html() + ' Files';
                 params.includeDMSID = $('#select-export-attachments-dmsid').val().toLowerCase();
                 params.filenamesIn  = $('#input-export-attachments-in').val().toLowerCase();
                 params.filenamesEx  = $('#input-export-attachments-ex').val().toLowerCase();
@@ -1493,7 +1493,7 @@ function genRequests(limit) {
                 params.transition = $('#select-perform-transition').val();
                 let elemComment = $('#input-perform-transition');
                 if(!elemComment.hasClass('hidden')) params.comment = elemComment.val();
-                requests.push($.get('/plm/transition', params));
+                requests.push($.post('/plm/transition', params));
             } else if(run.actionId === 'perform-lifecycle-transition') {
 
                 params.transition = $('#select-perform-lifecycle-transition').val();

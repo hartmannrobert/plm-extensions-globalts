@@ -255,7 +255,7 @@ function clickWorkflowAction(elemClicked, params) {
     let link       = elemClicked.attr('data-link');
     let transition = elemClicked.val();
 
-    $.get('/plm/transition', { link : link, transition : transition }, function(response) {
+    $.post('/plm/transition', { link : link, transition : transition }, function(response) {
         if(response.error) showErrorMessage('Workflow Action Failed', response.data.message);
         $('#overlay').hide();
         clickWorkflowActionDone(response.params.link, response.params.tranistion, response);
@@ -277,7 +277,7 @@ function insertCreate(workspaceNames, workspaceIds, params) {
 
     let id = isBlank(params.id) ? 'create' : params.id;
     
-    settings.create[id] = getPanelSettings('', params, {
+    settings[id] = getPanelSettings('', params, {
         headerLabel  : 'Create New',
         layout       : 'normal',
         showInDialog : false
@@ -298,6 +298,7 @@ function insertCreate(workspaceNames, workspaceIds, params) {
         [ 'contextItem'         , null ],
         [ 'contextItemField'    , null ],
         [ 'contextItems'        , [] ],
+        [ 'contextItemsField'   , null ],
         [ 'contextItemFields'   , [] ],
         [ 'viewerImageFields'   , [] ],
         [ 'createButtonTitle'   , '' ],
@@ -311,44 +312,43 @@ function insertCreate(workspaceNames, workspaceIds, params) {
         [ 'afterCreation'       , function(id, link, data, contextId) { console.log('New item link : ' + link ); } ]
     ]);
 
-    settings.create[id].wsId     = '';
-    settings.create[id].editable = true;
-    settings.create[id].derived  = [];
-    settings.create[id].load     = function() { insertCreateData(id); }
+    settings[id].wsId     = '';
+    settings[id].editable = true;
+    settings[id].derived  = [];
+    settings[id].load     = function() { insertCreateData(id); }
 
-    genPanelTop(id, settings.create[id], 'create');
-    genPanelHeader(id, settings.create[id]);
-    genPanelToggleButtons(id, settings.create[id], function() {
+    genPanelTop   (id, settings[id], 'create');
+    genPanelHeader(id, settings[id]);
+    genPanelToggleButtons(id, settings[id], function() {
         $('#' + id + '-content').find('.section.collapsed').click();
     }, function() {
         $('#' + id + '-content').find('.section.expanded').click();
     });
-    genPanelResizeButton(id, settings.create[id]);
-    genPanelReloadButton(id, settings.create[id]);
+    genPanelResizeButton(id, settings[id]);
+    genPanelReloadButton(id, settings[id]);
+    genPanelContents    (id, settings[id]).addClass(settings[id].layout).addClass('sections');
 
-    genPanelContents(id, settings.create[id]).addClass(settings.create[id].layout).addClass('sections');
+    if(settings[id].cancelButton) {
+        genPanelFooterActionButton(id, settings[id], 'cancel', {
 
-    if(settings.create[id].cancelButton) {
-        genPanelFooterActionButton(id, settings.create[id], 'cancel', {
-
-            label   : settings.create[id].cancelButtonLabel,
-            icon    : settings.create[id].cancelButtonIcon,
-            title   : settings.create[id].cancelButtonTitle,
+            label   : settings[id].cancelButtonLabel,
+            icon    : settings[id].cancelButtonIcon,
+            title   : settings[id].cancelButtonTitle,
 
         }, function() { 
 
             $('#overlay').hide();
             $('#' + id).hide();
-            settings.create[id].onClickCancel(id);
+            settings[id].onClickCancel(id);
 
         });
     }
 
-    genPanelFooterActionButton(id, settings.create[id], 'save', {
+    genPanelFooterActionButton(id, settings[id], 'save', {
 
-        label   : settings.create[id].createButtonLabel,
-        icon    : settings.create[id].createButtonIcon,
-        title   : settings.create[id].createButtonTitle,
+        label   : settings[id].createButtonLabel,
+        icon    : settings[id].createButtonIcon,
+        title   : settings[id].createButtonTitle,
         default : true
 
     }, function() { 
@@ -358,7 +358,7 @@ function insertCreate(workspaceNames, workspaceIds, params) {
         $('#' + id + '-content').hide();
         $('#' + id + '-footer').hide();
 
-        submitCreate(settings.create[id].wsId, settings.create[id].sections, $('#' + id + '-content'), settings.create[id], function(response) {
+        submitCreate(settings[id].wsId, settings[id].sections, $('#' + id + '-content'), settings[id], function(response) {
 
             $('#' + id + '-processing').hide();
             $('#' + id + '-actions').show();
@@ -368,7 +368,7 @@ function insertCreate(workspaceNames, workspaceIds, params) {
             if(!isBlank(response.link)) {
 
                 insertCreateAfterCreation(id, response.link);
-                settings.create[id].afterCreation(id, response.link, response.data, settings.create[id].contextId);
+                settings[id].afterCreation(id, response.link, response.data, settings[id].contextId);
 
             }
 
@@ -378,8 +378,8 @@ function insertCreate(workspaceNames, workspaceIds, params) {
 
     if(workspaceIds.length === 1) {
 
-        settings.create[id].wsId = workspaceIds[0];
-        settings.create[id].load();
+        settings[id].wsId = workspaceIds[0];
+        settings[id].load();
 
     } else {
 
@@ -390,15 +390,15 @@ function insertCreate(workspaceNames, workspaceIds, params) {
                 for(let workspace of workspaces) {
                     for(let result of response.data.items) {
                         if(result.title.toLowerCase() === workspace.toLowerCase()) {
-                            settings.create[id].wsId = [ result.link.split('/')[4] ];
-                            settings.create[id].load();
+                            settings[id].wsId = [ result.link.split('/')[4] ];
+                            settings[id].load();
                         }
                     }
                 }
 
             } else {
 
-                let elemToolbar = genPanelToolbar(id, settings.create[id], 'actions').css('justify-content', 'center');
+                let elemToolbar = genPanelToolbar(id, settings[id], 'actions').css('justify-content', 'center');
 
                 $('<span></span>').appendTo(elemToolbar)
                     .html('Select workspace of new record:');
@@ -407,8 +407,8 @@ function insertCreate(workspaceNames, workspaceIds, params) {
                     .addClass('button')
                     .addClass('main')
                     .on('change', function() {
-                        settings.create[id].wsId = elemSelect.val();
-                        settings.create[id].load();
+                        settings[id].wsId = elemSelect.val();
+                        settings[id].load();
                     });
 
 
@@ -443,8 +443,8 @@ function insertCreate(workspaceNames, workspaceIds, params) {
 
                 }
 
-                settings.create[id].wsId = elemSelect.children().first().attr('value');
-                settings.create[id].load();
+                settings[id].wsId = elemSelect.children().first().attr('value');
+                settings[id].load();
 
             }
         });
@@ -453,33 +453,37 @@ function insertCreate(workspaceNames, workspaceIds, params) {
 }
 function insertCreateData(id) {
 
-    settings.create[id].timestamp = startPanelContentUpdate(id);
+    settings[id].timestamp = startPanelContentUpdate(id);
 
     let requests = [
-        $.get('/plm/sections', { wsId : settings.create[id].wsId, useCache : settings.create[id].useCache, timestamp : settings.create[id].timestamp } ),
-        $.get('/plm/fields'  , { wsId : settings.create[id].wsId, useCache : settings.create[id].useCache } )
+        $.get('/plm/sections', { wsId : settings[id].wsId, useCache : settings[id].useCache, timestamp : settings[id].timestamp } ),
+        $.get('/plm/fields'  , { wsId : settings[id].wsId, useCache : settings[id].useCache } )
     ]
 
-    for(let contextItem of settings.create[id].contextItems) {
-        requests.push($.get('/plm/details', { link : contextItem }));
+    for(let contextItem of settings[id].contextItems) {
+        if(typeof contextItem === 'string') {
+            requests.push($.get('/plm/details', { link : contextItem }));
+        }
     }
 
-    if(!isBlank(settings.create[id].contextItem)) {
-        requests.push($.get('/plm/details', { link : settings.create[id].contextItem }));
+    if(!isBlank(settings[id].contextItem)) {
+        if(typeof contextItem === 'string') {
+            requests.push($.get('/plm/details', { link : settings[id].contextItem }));
+        }
     }
 
-    if((settings.create[id].picklistShortcuts)) {
+    if((settings[id].picklistShortcuts)) {
         requests.push($.get('/plm/bookmarks'));
         requests.push($.get('/plm/recent'));
     }
     
-    if(!isBlank(settings.create[id].performTransition)) {
-        requests.push($.get('/plm/workspace-workflow-transitions', { wsId : settings.create[id].wsId }));
+    if(!isBlank(settings[id].performTransition)) {
+        requests.push($.get('/plm/workspace-workflow-transitions', { wsId : settings[id].wsId }));
     }
 
     Promise.all(requests).then(function(responses) {
 
-        if(stopPanelContentUpdate(responses[0], settings.create[id])) return;
+        if(stopPanelContentUpdate(responses[0], settings[id])) return;
 
         let bookmarks   = [];
         let recents     = [];
@@ -499,62 +503,86 @@ function insertCreateData(id) {
             
         }
 
-        if(!isBlank(settings.create[id].performTransition)) {
+        if(!isBlank(settings[id].performTransition)) {
             for(let transition of transitions) {
-                if(transition.customLabel === settings.create[id].performTransition) {
-                    settings.create[id].transition = transition.__self__;
+                if(transition.customLabel === settings[id].performTransition) {
+                    settings[id].transition = transition.__self__;
                     break;
                 }
             }
         }
 
-        settings.create[id].sections = responses[0].data;
+        settings[id].sections = responses[0].data;
 
-        insertDetailsFields(id, responses[0].data, responses[1].data, null, settings.create[id], bookmarks, recents, function() {
+        insertDetailsFields(id, responses[0].data, responses[1].data, null, settings[id], bookmarks, recents, function() {
 
-            if(settings.create[id].contextItems.length === settings.create[id].contextItemFields.length) {
-            
+
+            if(settings[id].contextItems.length > 0) {
+
                 let index = 0;
 
-                for(let contextItemField of settings.create[id].contextItemFields) {
-                    settings.create[id].fieldValues.push({
-                        fieldId      : contextItemField,
-                        value        : settings.create[id].contextItems[index],
-                        displayValue : responses[2 + index++].data.title
-                    });
+                if(settings[id].contextItems.length === settings[id].contextItemFields.length) {
+
+                    for(let contextItemField of settings[id].contextItemFields) {
+                        settings[id].fieldValues.push({
+                            fieldId      : contextItemField,
+                            value        : settings[id].contextItems[index],
+                            displayValue : responses[2 + index++].data.title
+                        });
+                    }
+
+                } if(!isBlank(settings[id].contextItemsField)) {
+
+                    let fieldValue = {
+                        fieldId      : settings[id].contextItemsField,
+                        value        : [],
+                        displayValue : []
+                    }
+
+                    for(let contextItem of settings[id].contextItems) {
+                        if(typeof contextItem === 'string') {
+                            fieldValue.value.push(contextItem),
+                            fieldValue.displayValue.push(responses[2 + index++].data.title)
+                        } else {
+                            fieldValue.value.push(contextItem.value);
+                            fieldValue.displayValue.push(contextItem.display);
+                        }
+                    }
+
+                    settings[id].fieldValues.push(fieldValue);
+
                 }
+            }
 
-            } 
+            if(!isBlank(settings[id].contextItem)) {
 
-            if(!isBlank(settings.create[id].contextItem)) {
-
-                if(!isBlank(settings.create[id].contextItemField)) {
-                    settings.create[id].fieldValues.push({
-                        fieldId      : settings.create[id].contextItemField,
-                        value        : settings.create[id].contextItem,
+                if(!isBlank(settings[id].contextItemField)) {
+                    settings[id].fieldValues.push({
+                        fieldId      : settings[id].contextItemField,
+                        value        : settings[id].contextItem,
                         displayValue : responses[2].data.title
                     });
                 }
 
-                for(let contextItemField of settings.create[id].contextItemFields) {
-                    settings.create[id].fieldValues.push({
-                        fieldId      : contextItemField,
-                        value        : settings.create[id].contextItem,
-                        displayValue : responses[2].data.title
-                    });
-                }
+                // for(let contextItemField of settings[id].contextItemFields) {
+                //     settings[id].fieldValues.push({
+                //         fieldId      : contextItemField,
+                //         value        : settings[id].contextItem,
+                //         displayValue : responses[2].data.title
+                //     });
+                // }
 
             }
             
-            for(let viewerImageField of settings.create[id].viewerImageFields) {
-                settings.create[id].fieldValues.push({
+            for(let viewerImageField of settings[id].viewerImageFields) {
+                settings[id].fieldValues.push({
                     fieldId      : viewerImageField,
                     viewerImage  : 'viewer-markup-image'
                 });
             }
 
-            insertCreateDataSetFieldValues(id, settings.create[id]);
-            finishPanelContentUpdate(id, settings.create[id]);
+            insertCreateDataSetFieldValues(id, settings[id]);
+            finishPanelContentUpdate(id, settings[id]);
             
         });
 
@@ -576,53 +604,67 @@ function insertCreateDataSetFieldValues(id, settings) {
 
                 if(fieldValue.fieldId === fieldId) {
 
-                    elemField.removeClass('field-editable').addClass('field-locked');
+                    if(isBlank(fieldValue.viewerImage)) { 
 
-                    if(elemField.hasClass('field-type-single-select')) {
+                        elemField.removeClass('field-editable').addClass('field-locked');
+                        setFieldValue(elemField, fieldValue.value, fieldValue.displayValue);
 
-                        let elemInput= elemField.find('input').first();
-
-                        elemInput.val(fieldValue.value);
-                        elemInput.attr('disabled', 'disabled');
-                        elemInput.attr('data-value', fieldValue.value);
-                        elemInput.val(fieldValue.displayValue);
-                        elemInput.siblings().remove();
-
-                    } else if(elemField.hasClass('picklist')) {
-
-                        let elemSelect = elemField.children().first();
-                            elemSelect.attr('disabled', 'disabled');
-                            elemSelect.children().remove();
-
-                        $('<option></option>').appendTo(elemSelect)
-                            .attr('id', fieldValue.value)
-                            .attr('value', fieldValue.value)
-                            .attr('displayValue', fieldValue.displayValue)
-                            .html(fieldValue.displayValue);
-
-                        elemSelect.val(fieldValue.value);
-
-                    } else if(!isBlank(fieldValue.viewerImage)) { 
+                    } else {
                         let elemCanvas = $('#viewer-markup-' + fieldValue.fieldId);
                         if(elemCanvas.length === 0) {
                             elemCanvas = $('<canvas>').attr('id', 'viewer-markup-' + fieldValue.fieldId).addClass('viewer-screenshot');
                         }
                         elemField.html('').append(elemCanvas);
                         viewerCaptureScreenshot('viewer-markup-' + fieldValue.fieldId, function() {});
-                    } else {
-
-                        let elemInput    = elemField.children('input').first();
-                        let elemTextarea = elemField.children('textarea').first();
-
-                        if(elemInput.length   > 0) {
-                            elemInput.val(fieldValue.value);
-                            elemInput.attr('disabled', 'disabled');
-                        }
-                        if(elemTextarea.length > 0) elemTextarea.val(fieldValue.value);
-
                     }
+
+                    // if(elemField.hasClass('field-type-single-select')) {
+
+                    //     let elemInput= elemField.find('input').first();
+
+                    //     elemInput.val(fieldValue.value);
+                    //     elemInput.attr('disabled', 'disabled');
+                    //     elemInput.attr('data-value', fieldValue.value);
+                    //     elemInput.val(fieldValue.displayValue);
+                    //     elemInput.siblings().remove();
+
+                    // } else if(elemField.hasClass('picklist')) {
+
+                    //     let elemSelect = elemField.children().first();
+                    //         elemSelect.attr('disabled', 'disabled');
+                    //         elemSelect.children().remove();
+
+                    //     $('<option></option>').appendTo(elemSelect)
+                    //         .attr('id', fieldValue.value)
+                    //         .attr('value', fieldValue.value)
+                    //         .attr('displayValue', fieldValue.displayValue)
+                    //         .html(fieldValue.displayValue);
+
+                    //     elemSelect.val(fieldValue.value);
+
+                    // } else if(!isBlank(fieldValue.viewerImage)) { 
+                    //     let elemCanvas = $('#viewer-markup-' + fieldValue.fieldId);
+                    //     if(elemCanvas.length === 0) {
+                    //         elemCanvas = $('<canvas>').attr('id', 'viewer-markup-' + fieldValue.fieldId).addClass('viewer-screenshot');
+                    //     }
+                    //     elemField.html('').append(elemCanvas);
+                    //     viewerCaptureScreenshot('viewer-markup-' + fieldValue.fieldId, function() {});
+                    // } else {
+
+                    //     let elemInput    = elemField.children('input').first();
+                    //     let elemTextarea = elemField.children('textarea').first();
+
+                    //     if(elemInput.length   > 0) {
+                    //         elemInput.val(fieldValue.value);
+                    //         elemInput.attr('disabled', 'disabled');
+                    //     }
+                    //     if(elemTextarea.length > 0) elemTextarea.val(fieldValue.value);
+
+                    // }
+
                 }
 
+                elemField.removeClass('editable').addClass('readonly').addClass('locked');
                 elemField.parent().removeClass('editable').addClass('readonly').addClass('locked');
 
 
@@ -636,7 +678,7 @@ function insertCreateAfterCreation(id, link) {
 
     clearAllFormFields(id);
 
-    if((settings.create[id].dialog) || $('#' + id).hasClass('dialog'))  {
+    if((settings[id].dialog) || $('#' + id).hasClass('dialog'))  {
         $('#overlay').hide();
         $('#' + id).hide();
     } else {
@@ -712,6 +754,8 @@ function submitCreate(wsIdNew, sections, elemParent, settings, callback) {
                 data        : JSON.stringify(params)
             }, function(response) {
 
+                printResponseErrorMessagesToConsole(response);
+
                 if(response.error) {
                     showErrorMessage('Error creating item', response.message);
                     callback(response);
@@ -722,7 +766,7 @@ function submitCreate(wsIdNew, sections, elemParent, settings, callback) {
 
                     if(isBlank(settings.transition)) callback(result);
                     else {
-                        $.get('/plm/transition', { link : result.link, transition : settings.transition}, function() {
+                        $.post('/plm/transition', { link : result.link, transition : settings.transition}, function() {
                             callback(result);
                         });
                     }
@@ -745,12 +789,17 @@ function getFieldValues(elemParent, filter) {
     elemParent.find('.field-value' + filter).each(function() {
 
         let elemField = $(this);
-        let included  = elemField.hasClass('field-editable') || elemField.hasClass('field-locked');  // field-locked is used when fields are disabled per contextItem* parameters
         let fieldData = getFieldValue(elemField);
-
+        let included  = elemField.hasClass('field-editable') || elemField.hasClass('field-locked');  
+        // field-locked is used when fields are disabled per contextItem* parameters
+                        
         if(included) {
-
-            if(typeof fieldData.value !== 'undefined') {
+                            
+            if(elemField.hasClass('field-classification')) {
+                // field-classification is used for fields driven by classification which must always be included in the payload
+                fieldData.fieldTypeId = elemField.attr('data-type-id');
+                fields.push(fieldData);
+            } else if(typeof fieldData.value !== 'undefined') {
                 if(fieldData.type !== 'image') {
                     fields.push(fieldData);
                 }
@@ -824,9 +873,12 @@ function getFieldValue(elemField) {
     // Returns basic link value for picklist fields instead of object as 
     // processing will be performed in the create/edit wrapper call
 
-    let elemInput = elemField.find('input');
-    let value     = (elemInput.length > 0) ? elemInput.val() : '';
+    let elemSection = elemField.closest('.section-fields');
+    let elemInput   = elemField.find('input');
+    let value       = (elemInput.length > 0) ? elemInput.val() : '';
     // let hasSelect = (elemField.find('select').length > 0);
+
+    if(elemField.children().length === 0) value = elemField.html();
 
     let result = {
         fieldId   : elemField.attr('data-id'),
@@ -835,7 +887,13 @@ function getFieldValue(elemField) {
         typeId    : elemField.attr('data-type-id'),
         value     : value,
         display   : value,
-        type      : elemField.attr('data-type') || 'string'
+        type      : elemField.attr('data-type') || 'string',
+        sectionId : '',
+        classId   : elemField.attr('data-class-id') || ''
+    }
+
+    if(elemSection.length === 1) {
+        result.sectionId = elemSection.attr('data-id') || '';
     }
 
     switch(elemField.attr('data-type')) {
@@ -873,8 +931,12 @@ function getFieldValue(elemField) {
 
         case 'buom':
         case 'single-select':
-            result.value = elemField.find('.picklist-input').first().attr('data-value');
+            result.value  = elemField.find('.picklist-input').first().attr('data-value');
             result.lookup = { link : result.value }
+            if(typeof result.value === 'undefined') {
+                result.value  = null;
+                result.lookup = { link : null };
+            }
             break;
 
         case 'multi-select':
@@ -1068,7 +1130,7 @@ function insertDetails(link, params) {
 
     let id = isBlank(params.id) ? 'details' : params.id;
     
-    settings.details[id] = getPanelSettings(link, params, {
+    settings[id] = getPanelSettings(link, params, {
         headerLabel : 'Details',
         layout      : 'normal'
     }, [
@@ -1093,28 +1155,27 @@ function insertDetails(link, params) {
         [ 'afterCloning'       , function(id, link) { console.log('New item link : ' + link ); } ]
     ]);
 
-    settings.details[id].load = function() { insertDetailsData(id); }
+    settings[id].load = function() { insertDetailsData(id); }
 
-    genPanelTop(id, settings.details[id], 'details');
-    genPanelHeader(id, settings.details[id]);
-    genPanelToggleButtons(id, settings.details[id], function() {
+    genPanelTop   (id, settings[id], 'details');
+    genPanelHeader(id, settings[id]);
+    genPanelToggleButtons(id, settings[id], function() {
         $('#' + id + '-content').find('.section.collapsed').click();
     }, function() {
         $('#' + id + '-content').find('.section.expanded').click();
     });
-    genPanelBookmarkButton(id, settings.details[id]);
-    genPanelCloneButton(id, settings.details[id]);
-    genPanelOpenInPLMButton(id, settings.details[id]);
-    genPanelWorkflowActions(id, settings.details[id]);
-    genPanelSearchInput(id, settings.details[id]);
-    genPanelResizeButton(id, settings.details[id]);
-    genPanelReloadButton(id, settings.details[id]);
+    genPanelBookmarkButton (id, settings[id]);
+    genPanelCloneButton    (id, settings[id]);
+    genPanelOpenInPLMButton(id, settings[id]);
+    genPanelWorkflowActions(id, settings[id]);
+    genPanelSearchInput    (id, settings[id]);
+    genPanelResizeButton   (id, settings[id]);
+    genPanelReloadButton   (id, settings[id]);
+    genPanelContents       (id, settings[id]).addClass(settings[id].layout).addClass('sections');
 
-    genPanelContents(id, settings.details[id]).addClass(settings.details[id].layout).addClass('sections');
+    if(settings[id].cloneDialog) {
 
-    if(settings.details[id].cloneDialog) {
-
-        genPanelFooterActionButton(id, settings.details[id], 'clone-cancel', {
+        genPanelFooterActionButton(id, settings[id], 'clone-cancel', {
             label   : 'Cancel',
             title   : 'Cancel',
             default : false
@@ -1123,7 +1184,7 @@ function insertDetails(link, params) {
             $('#' + id).hide();
         });
 
-        genPanelFooterActionButton(id, settings.details[id], 'clone-confirm', {
+        genPanelFooterActionButton(id, settings[id], 'clone-confirm', {
             label   : 'Clone',
             title   : 'Create clone in PLM',
             default : true
@@ -1132,22 +1193,22 @@ function insertDetails(link, params) {
             submitClone(id, function(url) {
                 $('#overlay').hide();
                 $('#' + id).hide();
-                settings.details[id].afterCloning(id, url);
+                settings[id].afterCloning(id, url);
             });
         });
 
-    } else if(settings.details[id].editable) {
+    } else if(settings[id].editable) {
 
-        genPanelFooterActionButton(id, settings.details[id], 'save', {
+        genPanelFooterActionButton(id, settings[id], 'save', {
 
-            label   : settings.details[id].saveButtonLabel,
+            label   : settings[id].saveButtonLabel,
             title   : 'Save changes to PLM',
             default : true
 
         }, function() { 
 
             appendOverlay(false);
-            submitEdit(settings.details[id].link, settings.details[id].sections, $('#' + id + '-content'), function() {
+            submitEdit(settings[id].link, settings[id].sections, $('#' + id + '-content'), function() {
                 $('#overlay').hide();
             });
 
@@ -1157,55 +1218,55 @@ function insertDetails(link, params) {
 
     insertDetailsDone(id);
 
-    settings.details[id].load();
+    settings[id].load();
 
 }
 function insertDetailsDone(id) {}
 function insertDetailsData(id) {
 
-    settings.details[id].timestamp = startPanelContentUpdate(id);
+    settings[id].timestamp = startPanelContentUpdate(id);
 
     let requests = [ 
-        $.get('/plm/details' , { link : settings.details[id].link, timestamp : settings.details[id].timestamp }),
-        $.get('/plm/sections', { wsId : settings.details[id].link.split('/')[4], useCache : settings.details[id].useCache }),
-        $.get('/plm/fields'  , { wsId : settings.details[id].link.split('/')[4], useCache : settings.details[id].useCache })
+        $.get('/plm/details' , { link : settings[id].link, timestamp : settings[id].timestamp }),
+        $.get('/plm/sections', { wsId : settings[id].link.split('/')[4], useCache : settings[id].useCache }),
+        $.get('/plm/fields'  , { wsId : settings[id].link.split('/')[4], useCache : settings[id].useCache })
     ];
 
-    if((settings.details[id].bookmark) ) requests.push($.get('/plm/bookmarks'  , { link : settings.details[id].link }));
-    if((settings.details[id].cloneable)) requests.push($.get('/plm/permissions', { link : settings.details[id].link }));
-    if((settings.details[id].picklistShortcuts)) {
+    if((settings[id].bookmark) ) requests.push($.get('/plm/bookmarks'  , { link : settings[id].link }));
+    if((settings[id].cloneable)) requests.push($.get('/plm/permissions', { link : settings[id].link }));
+    if((settings[id].picklistShortcuts)) {
         requests.push($.get('/plm/bookmarks'));
         requests.push($.get('/plm/recent'));
     }
 
     Promise.all(requests).then(function(responses) {
 
-        if(stopPanelContentUpdate(responses[0], settings.details[id])) return;
+        if(stopPanelContentUpdate(responses[0], settings[id])) return;
 
-        settings.details[id].sections   = responses[1].data;
-        settings.details[id].descriptor = responses[0].data.title;
+        settings[id].sections   = responses[1].data;
+        settings[id].descriptor = responses[0].data.title;
 
-        setPanelBookmarkStatus(id, settings.details[id], responses);
-        setPanelCloneStatus(id, settings.details[id], responses);
+        setPanelBookmarkStatus(id, settings[id], responses);
+        setPanelCloneStatus(id, settings[id], responses);
 
-        if(settings.details[id].workflowActions) {
-            insertWorkflowActions(settings.details[id].link, {
+        if(settings[id].workflowActions) {
+            insertWorkflowActions(settings[id].link, {
                 id : id + '-workflow-actions',
                 hideIfEmpty : true,
-                onComplete : function() { settings.details[id].load() }
+                onComplete : function() { settings[id].load() }
             });
         }
 
         let bookmarks = [];
         let recents   = [];
 
-        if((settings.details[id].picklistShortcuts)) {
+        if((settings[id].picklistShortcuts)) {
             bookmarks = responses[responses.length - 2].data.bookmarks;
             recents   = responses[responses.length - 1].data.recentlyViewedItems;
         }
 
-        insertDetailsFields(id, responses[1].data, responses[2].data, responses[0].data, settings.details[id], bookmarks, recents, function() {
-            finishPanelContentUpdate(id, settings.details[id]);
+        insertDetailsFields(id, responses[1].data, responses[2].data, responses[0].data, settings[id], bookmarks, recents, function() {
+            finishPanelContentUpdate(id, settings[id]);
             insertDetailsDataDone(id, responses[1].data, responses[2].data, responses[0].data);
         });
 
@@ -1213,35 +1274,35 @@ function insertDetailsData(id) {
     });
 
 }
-function insertDetailsFields(id, sections, fields, data, settings, bookmarks, recents, callback) {
+function insertDetailsFields(id, sections, fields, data, panelSettings, bookmarks, recents, callback) {
 
     $('#' + id + '-processing').hide();
 
-    if(isBlank(settings)) settings = {};
+    if(isBlank(panelSettings)) panelSettings = {};
 
     let elemContent = $('#' + id + '-content');
-    let sectionsIn  = settings.sectionsIn;
-    let sectionsEx  = settings.sectionsEx;
-    let fieldsIn    = settings.fieldsIn;
-    let fieldsEx    = settings.fieldsEx;
-    let fieldValues = (isBlank(settings.fieldValues)) ? [] : settings.fieldValues;
+    let sectionsIn  = panelSettings.sectionsIn || [];
+    let sectionsEx  = panelSettings.sectionsEx || [];
+    let fieldsIn    = panelSettings.fieldsIn   || [];
+    let fieldsEx    = panelSettings.fieldsEx   || [];
+    let fieldValues = (isBlank(panelSettings.fieldValues)) ? [] : panelSettings.fieldValues;
 
     elemContent.scrollTop();
-    settings.derived = [];
+    panelSettings.derived = [];
 
-    if(isBlank(settings.expandSections  )) settings.expandSections   = [];
-    if(isBlank(settings.collapseContents)) settings.collapseContents = false;
-    if(isBlank(settings.firstSectionOnly)) settings.firstSectionOnly = false;
-    if(isBlank(settings.editable        )) settings.editable         = false;
+    if(isBlank(panelSettings.expandSections  )) panelSettings.expandSections   = [];
+    if(isBlank(panelSettings.collapseContents)) panelSettings.collapseContents = false;
+    if(isBlank(panelSettings.firstSectionOnly)) panelSettings.firstSectionOnly = false;
+    if(isBlank(panelSettings.editable        )) panelSettings.editable         = false;
 
-    if(!settings.editable   ) elemContent.addClass('readonly');    
-    if(settings.hideSections) elemContent.addClass('sections-hidden');    
+    if(!panelSettings.editable   ) elemContent.addClass('readonly');    
+    if(panelSettings.hideSections) elemContent.addClass('sections-hidden');    
 
-    if(!isBlank(settings.sectionsOrder)) {
+    if(!isBlank(panelSettings.sectionsOrder)) {
 
         let sort = 1;
 
-        for(let orderedSection of settings.sectionsOrder) {
+        for(let orderedSection of panelSettings.sectionsOrder) {
             for(let section of sections) {
                 if(orderedSection === section.name) {
                     section.order = sort++;
@@ -1259,7 +1320,7 @@ function insertDetailsFields(id, sections, fields, data, settings, bookmarks, re
 
     }
 
-    if(settings.firstSectionOnly) {
+    if(panelSettings.firstSectionOnly) {
 
         if(sectionsIn.length > 0) {
             
@@ -1297,26 +1358,36 @@ function insertDetailsFields(id, sections, fields, data, settings, bookmarks, re
 
         field.id       = field.urn.split('.').pop();
         field.visible  = false;
+        field.hasValue = false;
+        field.setValue = null;
         field.required = isFieldRequired(field);
 
-        if(!settings.requiredFieldsOnly || field.required) {
-            if(fieldsIn.length === 0 || fieldsIn.includes(field.id)) {
-                if(fieldsEx.length === 0 || !fieldsEx.includes(field.id)) {
-                    for(let section of allVisibleSectionsFields) {
-                        if(section.fields.includes(field.id)) {
-                            field.visible = true;
-                            break;
+        if(field.visibility !== 'NEVER') {
+            if(!panelSettings.requiredFieldsOnly || field.required) {
+                if(fieldsIn.length === 0 || fieldsIn.includes(field.id)) {
+                    if(fieldsEx.length === 0 || !fieldsEx.includes(field.id)) {
+                        for(let section of allVisibleSectionsFields) {
+                            if(section.fields.includes(field.id)) {
+                                field.visible = true;
+                                break;
+                            }
                         }
                     }
                 }
             }
         }
-
+        for(let fieldValue of fieldValues) {
+            if(fieldValue.fieldId === field.id) {
+                field.hasValue = true;
+                field.setValue = fieldValue.value;
+                continue;
+            }
+        }
     }
 
-    getFieldsPicklistsData(settings, fields, function(picklistsData) {
+    getFieldsPicklistsData(panelSettings, fields, function(picklistsData) {
 
-        if(settings.editable) {
+        if(panelSettings.editable) {
             for(let field of fields) {
                 if(!isBlank(field.derived)) {
                     if(field.derived) {
@@ -1324,7 +1395,7 @@ function insertDetailsFields(id, sections, fields, data, settings, bookmarks, re
                         let source = field.derivedFieldSource.__self__.split('/').pop();
                         let isNew  = true;
 
-                        for(let derived of settings.derived) {
+                        for(let derived of panelSettings.derived) {
                             if(derived.source === source) {
                                 isNew = false;
                                 break;
@@ -1332,7 +1403,7 @@ function insertDetailsFields(id, sections, fields, data, settings, bookmarks, re
                         }
 
                         if(isNew) {
-                            settings.derived.push({
+                            panelSettings.derived.push({
                                 fieldId : field.__self__.split('/').pop(),
                                 source  : source
                             });
@@ -1349,12 +1420,12 @@ function insertDetailsFields(id, sections, fields, data, settings, bookmarks, re
             let sectionId   = section.__self__.split('/')[6];
             let isNew       = true;
             let sectionLock = false;
-            let className   = (settings.collapseContents) ? 'collapsed' : 'expanded';
+            let className   = (panelSettings.collapseContents) ? 'collapsed' : 'expanded';
             let elemSection = $('<div></div>');
 
-            if(!isBlank(settings.expandSections)) {
-                if(settings.expandSections.length > 0) {
-                    className = (settings.expandSections.includes(section.name)) ? 'expanded' : 'collapsed';
+            if(!isBlank(panelSettings.expandSections)) {
+                if(panelSettings.expandSections.length > 0) {
+                    className = (panelSettings.expandSections.includes(section.name)) ? 'expanded' : 'collapsed';
                 }
             }
 
@@ -1368,7 +1439,7 @@ function insertDetailsFields(id, sections, fields, data, settings, bookmarks, re
                 }
             }
 
-            if(!settings.hideSections) {
+            if(!panelSettings.hideSections) {
 
                 for(let cacheSection of cacheSections) {
                     if(cacheSection.link === id + section.__self__) {
@@ -1434,6 +1505,8 @@ function insertDetailsFields(id, sections, fields, data, settings, bookmarks, re
 
                         elemSection.html(section.name + ' : ' + dataSection.classificationName);
 
+                        sortArray(dataSection.fields, 'title');
+
                         for(let dataSectionField of dataSection.fields) {
 
                             let fieldId = dataSectionField.__self__.split('/').pop();
@@ -1442,16 +1515,35 @@ function insertDetailsFields(id, sections, fields, data, settings, bookmarks, re
                                 if(fieldsEx.length === 0 || !fieldsEx.includes(fieldId)) {
 
                                     let wsField = {
+                                        id              : dataSectionField.__self__.split('/').pop(),
                                         name            : dataSectionField.title,
                                         type            : dataSectionField.type,
+                                        classId         : dataSection.classificationId,
                                         unitOfMeasure   : null,
                                         urn             : dataSectionField.urn,
-                                        value           : dataSectionField.value,
+                                        value           : dataSectionField.value || null,
+                                        editability     : dataSectionField.editability || 'NEVER',
+                                        visible         : true,
                                         visibility      : 'ALWAYS'
                                     };
 
-                                    wsField.type.title = 'Single Line Text';
-                                    insertDetailsField(wsField, data, elemFields, settings, sectionLock, bookmarks, recents, picklistsData);
+                                    let fieldTypeId = wsField.type.link.split('/').pop();
+
+                                    switch(fieldTypeId) {
+
+                                        case '2':
+                                        case '4':
+                                            wsField.type.title = 'Single Line Text';
+                                            break;
+                                        
+                                        case '20':
+                                            wsField.type.title = 'Single Selection';
+                                            break;
+
+                                    }
+
+                                    let elemField = insertDetailsField(wsField, data, elemFields, panelSettings, sectionLock, bookmarks, recents, picklistsData);
+                                        elemField.find('.field-value').addClass('field-classification');
 
                                 }
                             }
@@ -1479,7 +1571,7 @@ function insertDetailsFields(id, sections, fields, data, settings, bookmarks, re
                                                     if(wsField.visible) {
                                                     // if(fieldsIn.length === 0 || fieldsIn.includes(matrixFieldId)) {
                                                         // if(fieldsEx.length === 0 || !fieldsEx.includes(matrixFieldId)) {
-                                                            insertDetailsField(wsField, data, elemFields, settings, sectionLock, bookmarks, recents, picklistsData);
+                                                            insertDetailsField(wsField, data, elemFields, panelSettings, sectionLock, bookmarks, recents, picklistsData);
                                                             included = true;
                                                         // }
                                                     }
@@ -1494,7 +1586,7 @@ function insertDetailsFields(id, sections, fields, data, settings, bookmarks, re
                         for(let wsField of fields) {
                             if(wsField.urn === sectionField.urn) {
                                 if(wsField.visible) {
-                                    insertDetailsField(wsField, data, elemFields, settings, sectionLock, bookmarks, recents, picklistsData);
+                                    insertDetailsField(wsField, data, elemFields, panelSettings, sectionLock, bookmarks, recents, picklistsData);
                                     included = true;
                                 }
                             }
@@ -1509,9 +1601,9 @@ function insertDetailsFields(id, sections, fields, data, settings, bookmarks, re
                                 if(wsField.urn === sectionField.urn) {
                                     if(fieldValue.fieldId === fieldId) {
                                        
-                                        wsField.visible = true;
-                                        let elemField = insertDetailsField(wsField, data, elemFields, settings, sectionLock, bookmarks, recents, picklistsData);
-                                        // elemField.addClass('hidden');
+                                        wsField.hasValue = true;
+                                        let elemField = insertDetailsField(wsField, data, elemFields, panelSettings, sectionLock, bookmarks, recents, picklistsData);
+                                        elemField.addClass('hidden');
                                         // insertHiddenDetailsField(wsField, elemFields, fieldValue);
                                     }
                                 }
@@ -1530,7 +1622,7 @@ function insertDetailsFields(id, sections, fields, data, settings, bookmarks, re
 
         }
 
-        insertAllPicklistData(settings, picklistsData, elemContent);
+        insertAllPicklistData(panelSettings, picklistsData, elemContent);
 
         callback();
 
@@ -1551,8 +1643,6 @@ function submitEdit(link, sections, elemParent, callback) {
             sections : sections,
             fields   : getFieldValues(elemParent, '.changed')
         };
-
-        console.log(params);
 
         if(params.fields.length === 0) callback();
         else {
@@ -1702,8 +1792,6 @@ function getAllVisibleSectionsFieldIDs(sections) {
 }
 function insertDetailsField(field, data, elemFields, settings, sectionLock, bookmarks, recents, picklistsData) {
 
-    if(!field.visible) return;
-
     if(isBlank(sectionLock)) sectionLock = false;
     if(isBlank(bookmarks  )) bookmarks   = false;
     if(isBlank(recents    )) recents     = false;
@@ -1722,18 +1810,22 @@ function insertDetailsField(field, data, elemFields, settings, sectionLock, book
         if(isBlank(settings.fieldsIn)) settings.fieldsIn = [];
     }
 
-    let hideComputed    = (isBlank(settings.hideComputed)) ? false : settings.hideComputed;
-    let hideReadOnly    = (isBlank(settings.hideReadOnly)) ? false : settings.hideReadOnly;
-    let hideLabels      = (isBlank(settings.hideLabels  )) ? false : settings.hideLabels;
-    let suppressLinks   = (isBlank(settings.suppressLink)) ? false : settings.suppressLinks;
-    let editable        = (isBlank(settings.editable    )) ? false : settings.editable;
+    let hideComputed = settings.hideComputed || false;
+    let hideReadOnly = settings.hideReadOnly || false;
+    let hideLabels   = settings.hideLabels   || false;
+    let editable     = settings.editable     || false;
 
-    if(field.visibility === 'NEVER') return;
-    if((field.editability === 'NEVER') && hideReadOnly) return;
-    if(field.formulaField  && hideComputed) return;
+    if(!field.hasValue) {
+        if(!field.visible) return;
+        if(field.visibility === 'NEVER') return;
+        if((field.editability === 'NEVER') && hideReadOnly) return;
+        if(field.formulaField  && hideComputed) return;
+    }
 
-    let value    = null;
-    let urn      = field.urn.split('.');
+
+
+    // let value    = null;
+    // let urn      = field.urn.split('.');
     // let fieldId  = urn[urn.length - 1];
     let readonly = (!settings.editable || field.editability === 'NEVER' || (field.editability !== 'ALWAYS' && (typeof data === 'undefined')) || field.formulaField);
     // let required = isFieldRequired(field, fieldId, settings);
@@ -1744,8 +1836,11 @@ function insertDetailsField(field, data, elemFields, settings, sectionLock, book
 
     // if(!required && settings.requiredFieldsOnly) return;
 
-    let elemField = $('<div></div>').addClass('field').addClass('content-item').attr('id', 'field-' + field.id);
-    let elemValue = $('<div></div>');
+    let elemField = $('<div></div>')
+        .addClass('field')
+        .addClass('content-item')
+        .attr('id', 'field-' + field.id)
+    let elemValue = $('<div></div>').attr('data-class-id', field.classId || '');
     let elemInput = $('<input>');
 
     // setFieldDataAndClasses(elemValue, field, settings.editable); // moved to function insertField
@@ -1759,7 +1854,7 @@ function insertDetailsField(field, data, elemFields, settings, sectionLock, book
                     let urn = itemField.urn.split('.');
                     let itemFieldId = urn[urn.length - 1];
                     if(field.id === itemFieldId) {
-                        value = itemField.value;
+                        // value = itemField.value;
                         break;
                     }
                 }
@@ -1767,11 +1862,11 @@ function insertDetailsField(field, data, elemFields, settings, sectionLock, book
         }
     }
 
-    if(isBlank(value)) {
-        if(field.hasOwnProperty('value')) value = field.value;
-    }
+    // if(isBlank(value)) {
+        // if(field.hasOwnProperty('value')) value = field.value;
+    // }
 
-    if(typeof value === 'undefined') value = null;
+    // if(typeof value === 'undefined') value = null;
 
     insertField(settings, elemValue, field, data, picklistsData, bookmarks, recents);
 
@@ -2089,12 +2184,12 @@ function insertDetailsField(field, data, elemFields, settings, sectionLock, book
 }
 function insertField(settings, elemParent, field, data, picklistsData, bookmarks, recents) {
 
-    if(field.visibility === 'NEVER') return null;
+    if(field.visibility === 'NEVER') elemParent.addClass('hidden');
 
     if(isBlank(field.id)) field.id = field.urn.split('.').pop();
 
-    let value     = getFieldValueFromResponseData(field.id, data) || '';
-    let editable  = (isBlank(settings.editable)) ? false : settings.editable;
+    let value     = (field.hasValue) ? field.setValue : getFieldValueFromResponseData(field.id, data) || '';
+    let editable  = settings.editable || false;
     let elemInput = $('<input>').attr('data-id', field.id);
 
     settings.readonly = (field.editability === 'NEVER') || (field.formulaField) || (field.type.title === 'Image') || false;
@@ -2107,7 +2202,9 @@ function insertField(settings, elemParent, field, data, picklistsData, bookmarks
 
         if(value === null) value = '';
 
-        if(field.unitOfMeasure !== null) value += ' ' + field.unitOfMeasure;
+        let displayValue = value;
+
+        if(field.unitOfMeasure !== null) displayValue = value + ' ' + field.unitOfMeasure;
 
         switch(field.type.title) {
 
@@ -2119,8 +2216,8 @@ function insertField(settings, elemParent, field, data, picklistsData, bookmarks
                 if(field.formulaField) {
                     elemParent.addClass('field-computed');
                     elemParent.addClass('no-scrollbar');
-                    elemParent.html($('<div></div>').html(value).text());
-                } else elemParent.html(value);
+                    elemParent.html($('<div></div>').html(displayValue).text());
+                } else elemParent.html(displayValue);
                 break;
 
             case 'Date':
@@ -2131,14 +2228,16 @@ function insertField(settings, elemParent, field, data, picklistsData, bookmarks
                 break;
 
             case 'Integer':
-                elemParent.html(value);
+                elemParent.html(displayValue);
                 break;
 
             case 'Float':
             case 'Money':
                 value = (value !== '') ? parseFloat(value).toFixed(field.fieldPrecision) : '';
-                if(value !== '' ) { if(field.unitOfMeasure !== null) value += ' ' + field.unitOfMeasure; }
-                elemParent.html(value);
+                if(value === '' ) { 
+                    displayValue = '';
+                } else if(field.unitOfMeasure !== null) { displayValue = value + ' ' + field.unitOfMeasure; }
+                elemParent.html(displayValue);
                 break;
 
             case 'Paragraph':
@@ -2180,12 +2279,14 @@ function insertField(settings, elemParent, field, data, picklistsData, bookmarks
                 break; 
 
             case 'Single Selection':
+            case 'Pick List (With search filter)':
+            case 'Linking Pick List (With search filter)':                
                 elemParent.addClass('nowrap');
                 if(!isBlank(value)) elemParent.html(value.title);
                 if(!isBlank(field.picklistFieldDefinition)) {
                     if(!settings.suppressLinks) {
                         elemParent.addClass('with-link');
-                        elemParent.click(function() { openItemByLink(value.link); })
+                        if(value !== '') elemParent.click(function() { openItemByLink(value.link); })
                     }
                 }
                 break;           
@@ -2320,6 +2421,8 @@ function insertField(settings, elemParent, field, data, picklistsData, bookmarks
             case 'Single Selection':
             case 'Multiple Selection':
             case 'BOM UOM Pick List':
+            case 'Pick List (With search filter)':
+            case 'Linking Pick List (With search filter)':
                 elemInput = insertFieldPicklistControls(settings, field, elemParent, value, bookmarks, recents);
                 updatePickListOptions(elemInput, 0, false, picklistsData);
                 break;
@@ -2346,7 +2449,17 @@ function insertField(settings, elemParent, field, data, picklistsData, bookmarks
 }
 function setFieldValue(elemField, value, display) {
 
-    if(elemField.hasClass('field-type-single-select')) {
+    if(elemField.hasClass('field-type-multi-select')) {
+
+        let elemList = elemField.find('.picklist-selected-items');
+            elemList.removeClass('hidden');
+            elemList.siblings().addClass('hidden');
+
+        for(let index in value) {
+            insertPicklistSelectedItem({}, elemList, value[index], display[index]);
+        }
+
+    } else if(elemField.hasClass('field-type-single-select')) {
         
         let elemInput = elemField.find('.picklist-input');
 
@@ -2370,7 +2483,7 @@ function setFieldValue(elemField, value, display) {
                 if($(this).attr('data-link') === value) $(this).addClass('selected');
             });
         }
-
+        
     } else if(elemField.hasClass('field-type-checkbox')) {
     } else elemField.children().val(value);
 
@@ -2719,8 +2832,11 @@ function insertFieldPicklistControls(settings, field, elemParent, value, bookmar
 }
 function updatePickListOptions(elemInput, offset, isUpdate, picklistsData) {
 
+    let elemField    = elemInput.closest('.field-value');
     let elemPicklist = elemInput.next();
     let filterValue  = elemInput.val().toLowerCase();
+
+    if(elemField.hasClass('field-classification')) return;
 
     if(elemInput.val() === '') elemInput.removeClass('filtering');
 
@@ -3324,7 +3440,7 @@ function submitClone(id, callback) {
         elemContent.hide();
 
     let params = { 
-        link     : settings.details[id].link,
+        link     : settings[id].link,
         sections : getSectionsPayload(elemContent)
     };
 
@@ -3346,7 +3462,7 @@ function insertImages(link, params) {
 
     let id = isBlank(params.id) ? 'images' : params.id;
     
-    settings.images[id] = getPanelSettings(link, params, {
+    settings[id] = getPanelSettings(link, params, {
         headerLabel : 'Images'
     }, [
         [ 'layout'     , 'grid' ],
@@ -3355,44 +3471,44 @@ function insertImages(link, params) {
         [ 'sectionsEx' , []     ]
     ]);
 
-    settings.images[id].load = function() { insertImagesData(id); }
+    settings[id].load = function() { insertImagesData(id); }
 
-    genPanelTop(id, settings.images[id], 'images');
-    genPanelHeader(id, settings.images[id]);
-    genPanelBookmarkButton(id, settings.images[id]);
-    genPanelOpenInPLMButton(id, settings.images[id]);
-    genPanelReloadButton(id, settings.images[id]);
-    genPanelContents(id, settings.images[id]).addClass('panel-images');
+    genPanelTop            (id, settings[id], 'images');
+    genPanelHeader         (id, settings[id]);
+    genPanelBookmarkButton (id, settings[id]);
+    genPanelOpenInPLMButton(id, settings[id]);
+    genPanelReloadButton   (id, settings[id]);
+    genPanelContents       (id, settings[id]).addClass('panel-images');
 
     insertImagesDone(id);
 
-    settings.images[id].load();
+    settings[id].load();
 
 }
 function insertImagesDone(id) {}
 function insertImagesData(id) {
 
-    settings.images[id].timestamp = startPanelContentUpdate(id);
+    settings[id].timestamp = startPanelContentUpdate(id);
 
     let requests = [ 
-        $.get('/plm/details' , { link : settings.images[id].link, timestamp : settings.images[id].timestamp })
+        $.get('/plm/details' , { link : settings[id].link, timestamp : settings[id].timestamp })
     ];
 
-    if((settings.images[id].bookmark) ) requests.push($.get('/plm/bookmarks', { link : settings.images[id].link }));
+    if((settings[id].bookmark) ) requests.push($.get('/plm/bookmarks', { link : settings[id].link }));
 
     Promise.all(requests).then(function(responses) {
 
-        if(stopPanelContentUpdate(responses[0], settings.images[id])) return;
+        if(stopPanelContentUpdate(responses[0], settings[id])) return;
 
-        let sectionsIn   = settings.images[id].sectionsIn;
-        let sectionsEx   = settings.images[id].sectionsEx;
-        let fieldsIn     = settings.images[id].fieldsIn;
-        let fieldsEx     = settings.images[id].fieldsEx;
+        let sectionsIn   = settings[id].sectionsIn;
+        let sectionsEx   = settings[id].sectionsEx;
+        let fieldsIn     = settings[id].fieldsIn;
+        let fieldsEx     = settings[id].fieldsEx;
         let elemContent  = $('#' + id + '-content');
 
-        settings.images[id].descriptor = responses[0].data.title;
+        settings[id].descriptor = responses[0].data.title;
 
-        setPanelBookmarkStatus(id, settings.images[id], responses);
+        setPanelBookmarkStatus(id, settings[id], responses);
 
         for(let section of responses[0].data.sections) {
 
@@ -3409,7 +3525,7 @@ function insertImagesData(id) {
                                 if(field.type.link === '/api/v3/field-types/15') {
                                     if(!isBlank(field.value)) {
                                         let elemImage = $('<div></div>').appendTo(elemContent).addClass('content-item');
-                                        appendImageFromCache(elemImage, settings.images[id], {
+                                        appendImageFromCache(elemImage, settings[id], {
                                             icon        : 'icon-image',
                                             imageLink   : field.value.link,
                                             replace     : true
@@ -3424,7 +3540,7 @@ function insertImagesData(id) {
             }
         }
 
-        finishPanelContentUpdate(id, settings.images[id]);
+        finishPanelContentUpdate(id, settings[id]);
         insertImagesDataDone(id, responses[0].data);
 
     });
@@ -3442,7 +3558,7 @@ function insertAttachments(link, params) {
 
     let id = isBlank(params.id) ? 'attachments' : params.id;
     
-    settings.attachments[id] = getPanelSettings(link, params, {
+    settings[id] = getPanelSettings(link, params, {
         headerLabel : 'Attachments',
         layout      : 'list',
         tileIcon    : 'icon-pdf',
@@ -3464,36 +3580,36 @@ function insertAttachments(link, params) {
         [ 'extensionsEx'          , [] ]
     ]);
 
-    settings.attachments[id].load = function() { fileUploadDone(id); }
+    settings[id].load = function() { fileUploadDone(id); }
 
-    genPanelTop(id, settings.attachments[id], 'attachments');
-    genPanelHeader(id, settings.attachments[id]);
-    genPanelBookmarkButton(id, settings.attachments[id]);
-    genPanelOpenInPLMButton(id, settings.attachments[id]);
-    genPanelFilterSelect(id, settings.attachments[id], 'filterByType', 'type', 'All Types');
-    genPanelSearchInput(id, settings.attachments[id]);
-    genPanelResizeButton(id, settings.attachments[id]);
-    genPanelReloadButton(id, settings.attachments[id]);
-    genPanelContents(id, settings.attachments[id]).addClass('attachments-content');
+    genPanelTop            (id, settings[id], 'attachments');
+    genPanelHeader         (id, settings[id]);
+    genPanelBookmarkButton (id, settings[id]);
+    genPanelOpenInPLMButton(id, settings[id]);
+    genPanelFilterSelect   (id, settings[id], 'filterByType', 'type', 'All Types');
+    genPanelSearchInput    (id, settings[id]);
+    genPanelResizeButton   (id, settings[id]);
+    genPanelReloadButton   (id, settings[id]);
+    genPanelContents       (id, settings[id]).addClass('attachments-content');
 
-    if(settings.attachments[id].editable) {
+    if(settings[id].editable) {
 
-        let elemToolbar = genPanelToolbar(id, settings.attachments[id], 'actions');
+        let elemToolbar = genPanelToolbar(id, settings[id], 'actions');
 
         let elemUpload = $('<div></div>').prependTo(elemToolbar)
             .addClass('button')
             .addClass('icon-upload')
             .addClass('disabled')
             .attr('id', id + '-upload')
-            .attr('title', settings.attachments[id].uploadLabel)
-            .html(settings.attachments[id].uploadLabel)
+            .attr('title', settings[id].uploadLabel)
+            .html(settings[id].uploadLabel)
             .click(function(e) {
                 e.preventDefault();
                 e.stopPropagation();
                 clickAttachmentsUpload(id, $(this));
             });
 
-        if(isBlank(settings.attachments[id].uploadLabel)) {
+        if(isBlank(settings[id].uploadLabel)) {
             elemUpload.addClass('icon');
         } else {
             elemUpload.addClass('with-icon');
@@ -3535,13 +3651,13 @@ function insertAttachments(link, params) {
             });
         }
         
-        if(settings.attachments[id].uploadScreenshot) {
+        if(settings[id].uploadScreenshot) {
 
             let elemSaveScreenshot = $('<div></div>').prependTo(elemToolbar)
                 .addClass('button')
                 .addClass('icon-screenshot')
                 .attr('id', id + '-screenshot')
-                .attr('title', settings.attachments[id].uploadScreenshotLabel)
+                .attr('title', settings[id].uploadScreenshotLabel)
                 
                 .click(function(e) {
                     e.preventDefault();
@@ -3549,13 +3665,13 @@ function insertAttachments(link, params) {
                     clickScreenshotUpload(id, $(this));
                 });
 
-            if(isBlank(settings.attachments[id].uploadScreenshotLabel)) {
+            if(isBlank(settings[id].uploadScreenshotLabel)) {
                 elemSaveScreenshot.addClass('icon');
             } else {
-                if(settings.attachments[id].hideButtonLabels) {
+                if(settings[id].hideButtonLabels) {
                     elemSaveScreenshot.addClass('icon');
                 } else {
-                    elemSaveScreenshot.addClass('with-icon').html(settings.attachments[id].uploadScreenshotLabel)
+                    elemSaveScreenshot.addClass('with-icon').html(settings[id].uploadScreenshotLabel)
                 }
             }
 
@@ -3569,7 +3685,7 @@ function insertAttachments(link, params) {
 
     }
 
-    if(settings.attachments[id].download) {
+    if(settings[id].download) {
         if($('#frame-download').length === 0) {
             $('<frame>').appendTo($('body'))
                 .attr('id', 'frame-download')
@@ -3584,8 +3700,8 @@ function insertAttachments(link, params) {
 function insertAttachmentsData(id, update) {
 
     let params = {
-        link      : settings.attachments[id].link,
-        timestamp : settings.attachments[id].timestamp
+        link      : settings[id].link,
+        timestamp : settings[id].timestamp
     }
 
     let elemContent = $('#' + id + '-content');      
@@ -3607,22 +3723,22 @@ function insertAttachmentsData(id, update) {
 
     let requests = [
         $.get('/plm/attachments', params),
-        $.get('/plm/permissions', { link : settings.attachments[id].link })
+        $.get('/plm/permissions', { link : settings[id].link })
     ];
 
     elemContent.hide();
     $('#' + id + '-no-data').hide();
     $('#' + id + '-processing').show();
 
-    if((settings.attachments[id].includeRelatedFiles)) requests.push($.get('/plm/related-attachments', { link : settings.attachments[id].link })); 
-    if((settings.attachments[id].bookmark           )) requests.push($.get('/plm/bookmarks', { link : settings.attachments[id].link })); 
-    if((settings.attachments[id].includeVaultFiles  )) requests.push($.get('/plm/details', { link : settings.attachments[id].link })); 
+    if((settings[id].includeRelatedFiles)) requests.push($.get('/plm/related-attachments', { link : settings[id].link })); 
+    if((settings[id].bookmark           )) requests.push($.get('/plm/bookmarks', { link : settings[id].link })); 
+    if((settings[id].includeVaultFiles  )) requests.push($.get('/plm/details', { link : settings[id].link })); 
 
     Promise.all(requests).then(function(responses) {
 
-        if(stopPanelContentUpdate(responses[0], settings.attachments[id])) return;
+        if(stopPanelContentUpdate(responses[0], settings[id])) return;
 
-        setPanelBookmarkStatus(id, settings.attachments[id], responses);
+        setPanelBookmarkStatus(id, settings[id], responses);
 
         let attachments = responses[0].data;
         let currentIDs  = [];
@@ -3649,7 +3765,7 @@ function insertAttachmentsData(id, update) {
         });
 
 
-        if((settings.attachments[id].includeRelatedFiles)) {
+        if((settings[id].includeRelatedFiles)) {
             for(let related of responses[2].data) attachments.push(related);
         }
 
@@ -3660,8 +3776,8 @@ function insertAttachmentsData(id, update) {
             let extension = attachment.type.extension.split('.').pop();
             let included  = true;
 
-            if((settings.attachments[id].extensionsIn.length === 0) || ( settings.attachments[id].extensionsIn.includes(extension))) {
-                if((settings.attachments[id].extensionsEx.length === 0) || (!settings.attachments[id].extensionsEx.includes(extension))) { 
+            if((settings[id].extensionsIn.length === 0) || ( settings[id].extensionsIn.includes(extension))) {
+                if((settings[id].extensionsEx.length === 0) || (!settings[id].extensionsEx.includes(extension))) { 
 
                     let attFolder   = attachment.folder;
                     let folderId    = '';
@@ -3721,7 +3837,7 @@ function insertAttachmentsData(id, update) {
                         .addClass('attachment-name')
                         .addClass('tile-title');
 
-                    if(!settings.attachments[id].split) {
+                    if(!settings[id].split) {
 
                         elemAttachmentName.addClass('nowrap');
                         elemAttachmentName.html(attachment.name);
@@ -3748,14 +3864,14 @@ function insertAttachmentsData(id, update) {
                         .addClass('attachment-summary')
                         .addClass('tile-data')
 
-                    if(settings.attachments[id].fileVersion) {
+                    if(settings[id].fileVersion) {
                         $('<div></div>').appendTo(elemAttachmentSummary)
                             .addClass('attachment-version')
                             .addClass('nowrap')
                             .html('V' + attachment.version);
                     }
 
-                    if(settings.attachments[id].fileSize) {
+                    if(settings[id].fileSize) {
                         let fileSize = (attachment.size / 1024 / 1024).toFixed(2);
                         $('<div></div>').appendTo(elemAttachmentSummary)
                             .addClass('attachment-size')
@@ -3782,13 +3898,13 @@ function insertAttachmentsData(id, update) {
                         elemAttachmentSummary.remove();
                     }
 
-                    if(settings.attachments[id].download) {
+                    if(settings[id].download) {
                         if(hasPermission(responses[1].data, 'view_attachments')) {
                             elemAttachment.click(function() {
                                 clickAttachment($(this));      
-                                if(!isBlank(settings.attachments[id].onItemClick)) settings.attachments[id].onItemClick($(this));                          
+                                if(!isBlank(settings[id].onItemClick)) settings[id].onItemClick($(this));                          
                             }).dblclick(function() {
-                                if(!isBlank(settings.attachments[id].onItemDblClick)) settings.attachments[id].onItemDblClick($(this));                          
+                                if(!isBlank(settings[id].onItemDblClick)) settings[id].onItemDblClick($(this));                          
                             });
                         }
                     }
@@ -3798,7 +3914,7 @@ function insertAttachmentsData(id, update) {
 
         }
 
-        if(settings.attachments[id].folders) {
+        if(settings[id].folders) {
 
             for(let folder of folders) {
 
@@ -3868,7 +3984,7 @@ function insertAttachmentsData(id, update) {
             listTypes.sort();
 
             setPanelFilterOptions(id, 'type', listTypes);
-            finishPanelContentUpdate(id, settings.attachments[id]);
+            finishPanelContentUpdate(id, settings[id]);
             insertAttachmentsDone(id, responses[0], update);
 
         });
@@ -3881,7 +3997,7 @@ function insertVaultFiles(id, responses, listTypes, callback) {
 
     let itemData = null;
 
-    if(!settings.attachments[id].includeVaultFiles) callback(); else {
+    if(!settings[id].includeVaultFiles) callback(); else {
 
         if(isBlank(vaultId)) callback(); else {
 
@@ -3891,8 +4007,7 @@ function insertVaultFiles(id, responses, listTypes, callback) {
 
                 if(itemData.length === 0) callback(); else {
 
-                    let number      = getSectionFieldValue(itemData.sections, config.items.fieldIdNumber, '');
-                    let pdmId       = getSectionFieldValue(itemData.sections, config.items.fieldIdPDM, '');
+                    let number      = getSectionFieldValue(itemData.sections, common.workspaces.items.fieldIdNumber, '');
                     let elemContent = $('#' + id + '-content');  
 
 
@@ -3949,8 +4064,8 @@ function insertVaultFile(id, elemContent, attachment, listTypes) {
 
     }
 
-    if((settings.attachments[id].extensionsIn.length === 0) || ( settings.attachments[id].extensionsIn.includes(suffix))) {
-        if((settings.attachments[id].extensionsEx.length === 0) || (!settings.attachments[id].extensionsEx.includes(suffix))) { 
+    if((settings[id].extensionsIn.length === 0) || ( settings[id].extensionsIn.includes(suffix))) {
+        if((settings[id].extensionsEx.length === 0) || (!settings[id].extensionsEx.includes(suffix))) { 
 
             if(!listTypes.includes(fileType)) listTypes.push(fileType);
 
@@ -3985,14 +4100,14 @@ function insertVaultFile(id, elemContent, attachment, listTypes) {
                 .addClass('attachment-summary')
                 .addClass('tile-data')
 
-            if(settings.attachments[id].fileVersion) {
+            if(settings[id].fileVersion) {
                 $('<div></div>').appendTo(elemAttachmentSummary)
                     .addClass('attachment-version')
                     .addClass('nowrap')
                     .html('V' + attachment.file.version);
             }
 
-            if(settings.attachments[id].fileSize) {
+            if(settings[id].fileSize) {
                 let fileSize = (attachment.file.size / 1024 / 1024).toFixed(2);
                 $('<div></div>').appendTo(elemAttachmentSummary)
                     .addClass('attachment-size')
@@ -4012,7 +4127,7 @@ function insertVaultFile(id, elemContent, attachment, listTypes) {
                 .addClass('nowrap')
                 .html('<i class="icon icon-user filled"></i>' + attachment.file.createUserName);
 
-            if(settings.attachments[id].download) {
+            if(settings[id].download) {
                 elemAttachment.click(function(e) {
                     clickVaultFile(e, $(this));
                 });
@@ -4224,7 +4339,7 @@ function clickAttachmentsUpload(id, elemClicked) {
 
     if(elemClicked.hasClass('disabled')) return;
 
-    let link = settings.attachments[id].link;
+    let link = settings[id].link;
 
     let urlUpload = '/plm/upload/';
         urlUpload += link.split('/')[4] + '/';
@@ -4248,7 +4363,7 @@ function selectFileForUpload(id) {
 }
 function fileUploadDone(id) {
 
-    settings.attachments[id].timestamp = new Date().getTime();
+    settings[id].timestamp = new Date().getTime();
     insertAttachmentsData(id, true);
 
 }
@@ -4265,7 +4380,7 @@ function clickScreenshotUpload(id, elemClicked) {
         let elemScreenshot = $('#' + idCanvas);
 
         let params = { 
-            link      : settings.attachments[id].link,
+            link      : settings[id].link,
             image     : {
                 fieldId : 'markup',
                 value   : elemScreenshot[0].toDataURL('image/jpg')
@@ -4295,7 +4410,7 @@ function insertGrid(link, params) {
 
     let id = isBlank(params.id) ? 'grid' : params.id;
     
-    settings.grid[id] = getPanelSettings(link, params, {
+    settings[id] = getPanelSettings(link, params, {
         headerLabel : 'Grid',
         layout      : 'table'
     }, [
@@ -4304,6 +4419,7 @@ function insertGrid(link, params) {
         [ 'hideButtonCreate'    , false ],
         [ 'hideButtonClone'     , false ],
         [ 'hideButtonDisconnect', false ],
+        [ 'saveButtonLabel'     , 'Save Changes' ],
         [ 'rotate'              , false ],
         [ 'sortOrder'           , [] ],
         [ 'sortBy'              , '' ],
@@ -4311,36 +4427,42 @@ function insertGrid(link, params) {
         [ 'sortType'            , 'string' ],
         [ 'bookmark'            , false ],
         [ 'picklistLimit'       , 10    ],
-        [ 'picklistShortcuts'   , false ]
+        [ 'picklistShortcuts'   , false ],
+        [ 'toggles'             , false ],
     ]);
 
-    settings.grid[id].layout = 'table';
-    settings.grid[id].load   = function() { insertGridData(id); }
+    settings[id].layout = 'table';
+    settings[id].load   = function() { insertGridData(id); }
 
-    genPanelTop(id, settings.grid[id], 'grid');
-    genPanelHeader(id, settings.grid[id]);
-    genPanelBookmarkButton(id, settings.grid[id]);
-    genPanelOpenInPLMButton(id, settings.grid[id]);
-    genPanelSelectionControls(id, settings.grid[id]);
-    genPanelFilterToggleEmpty(id, settings.grid[id]);
-    genPanelSearchInput(id, settings.grid[id]);
-    genPanelResizeButton(id, settings.grid[id]);
-    genPanelReloadButton(id, settings.grid[id]);
+    if(isBlank(settings[id].groupBy)) settings[id].toggles = false;
 
-    genPanelContents(id, settings.grid[id]);
+    genPanelTop              (id, settings[id], 'grid');
+    genPanelHeader           (id, settings[id]);
+    genPanelBookmarkButton   (id, settings[id]);
+    genPanelOpenInPLMButton  (id, settings[id]);
+    genPanelSelectionControls(id, settings[id]);
+    genPanelFilterToggleEmpty(id, settings[id]);
+    genPanelToggleButtons    (id, settings[id], 
+        function() {   expandAllTableGroups(id); }, 
+        function() { collapseAllTableGroups(id); }
+    );    
+    genPanelSearchInput      (id, settings[id]);
+    genPanelResizeButton     (id, settings[id]);
+    genPanelReloadButton     (id, settings[id]);
+    genPanelContents         (id, settings[id]);
 
-    if(settings.grid[id].editable) {
+    if(settings[id].editable) {
 
-        genPanelAutoSaveToggle(id, settings.grid[id]);
+        genPanelAutoSaveToggle(id, settings[id]);
 
-        let elemToolbar = genPanelToolbar(id, settings.grid[id], 'actions');
+        let elemToolbar = genPanelToolbar(id, settings[id], 'actions');
 
         $('<div></div>').prependTo(elemToolbar)
             .addClass('button')
             .addClass('default')
             .attr('id', id + '-action-save') 
             .attr('title', 'Save all changes to PLM')
-            .html('Save Changes')
+            .html(settings[id].saveButtonLabel)
             .addClass('hidden')
             .click(function(e) {
                 e.preventDefault();
@@ -4348,7 +4470,7 @@ function insertGrid(link, params) {
                 saveGridData(id);
             });
 
-        if(!settings.grid[id].hideButtonCreate) {
+        if(!settings[id].hideButtonCreate) {
 
             let elemButtonAdd = $('<div></div>').prependTo(elemToolbar)
                 .addClass('button')
@@ -4365,11 +4487,11 @@ function insertGrid(link, params) {
                     resetTableSelectAllCheckBox($(this));
                 });
 
-            if(settings.grid[id].hideButtonLabels) elemButtonAdd.addClass('icon'); else elemButtonAdd.addClass('with-icon').html('Insert Row');
+            if(settings[id].hideButtonLabels) elemButtonAdd.addClass('icon'); else elemButtonAdd.addClass('with-icon').html('Insert Row');
 
         }
 
-        if(!settings.grid[id].hideButtonClone) {
+        if(!settings[id].hideButtonClone) {
 
             let elemButtonClone = $('<div></div>').prependTo(elemToolbar)
                 .addClass('button')
@@ -4387,62 +4509,62 @@ function insertGrid(link, params) {
                     resetTableSelectAllCheckBox($(this));
                 });
 
-            if(settings.grid[id].hideButtonLabels) elemButtonClone.addClass('icon'); else elemButtonClone.addClass('with-icon').html('Clone Selected');                
+            if(settings[id].hideButtonLabels) elemButtonClone.addClass('icon'); else elemButtonClone.addClass('with-icon').html('Clone Selected');                
 
         }
 
-        let elemDisconnect = genPanelDisconnectButton(id, settings.grid[id], function() { deleteGridRows(id); });
+        let elemDisconnect = genPanelDisconnectButton(id, settings[id], function() { deleteGridRows(id); });
             elemDisconnect.attr('title', 'Removes the selected rows from the view with the next Save operation');
             elemDisconnect.prependTo(elemToolbar);
 
-        if(settings.grid[id].hideButtonLabels) elemDisconnect.removeClass('with-icon').addClass('icon').html('');
+        if(settings[id].hideButtonLabels) elemDisconnect.removeClass('with-icon').addClass('icon').html('');
 
     }
 
     insertGridDone(id);
 
-    settings.grid[id].load();
+    settings[id].load();
 
 }
 function insertGridDone(id) {}
 function insertGridData(id) {
 
-    settings.grid[id].timestamp = startPanelContentUpdate(id);
+    settings[id].timestamp = startPanelContentUpdate(id);
 
     let params = {
-        link      : settings.grid[id].link,
-        timestamp : settings.grid[id].timestamp,
+        link      : settings[id].link,
+        timestamp : settings[id].timestamp,
     }
 
     let requests    = [
         $.get('/plm/grid'        , params),
         $.get('/plm/permissions' , params),
         $.get('/plm/grid-columns', { 
-            link            : settings.grid[id].link, 
-            useCache        : settings.grid[id].useCache,
-            getValidations  : settings.grid[id].editable
+            link            : settings[id].link, 
+            useCache        : settings[id].useCache,
+            getValidations  : settings[id].editable
         })
     ];
 
-    if(settings.grid[id].bookmark) requests.push($.get('/plm/bookmarks', { link : settings.grid[id].link })); 
-    if(settings.grid[id].headerLabel == 'descriptor') requests.push($.get('/plm/details', { link : settings.grid[id].link })); 
+    if(settings[id].bookmark) requests.push($.get('/plm/bookmarks', { link : settings[id].link })); 
+    if(settings[id].headerLabel == 'descriptor') requests.push($.get('/plm/details', { link : settings[id].link })); 
 
     Promise.all(requests).then(function(responses) {
 
-        if(stopPanelContentUpdate(responses[0], settings.grid[id])) return;
+        if(stopPanelContentUpdate(responses[0], settings[id])) return;
 
         let rows        = responses[0].data;
         let permissions = responses[1].data;
         let columns     = responses[2].data;
 
-        settings.grid[id].columns    = [];
-        settings.grid[id].picklists  = [];
+        settings[id].columns    = [];
+        settings[id].picklists  = [];
 
-        if(settings.grid[id].headerLabel == 'descriptor') settings.grid[id].descriptor = responses[responses.length - 1].data.title;
+        if(settings[id].headerLabel == 'descriptor') settings[id].descriptor = responses[responses.length - 1].data.title;
 
-        setPanelBookmarkStatus(id, settings.grid[id], responses);
+        setPanelBookmarkStatus(id, settings[id], responses);
 
-        if(!hasPermission(permissions, 'edit_grid')) settings.grid[id].editable = false;
+        if(!hasPermission(permissions, 'edit_grid')) settings[id].editable = false;
 
         let elemContent    = $('#' + id + '-content');
         let elemTable      = $('<table></table>').appendTo(elemContent).addClass('grid').attr('id', id + '-table');
@@ -4450,34 +4572,34 @@ function insertGridData(id) {
         let elemTBody      = $('<tbody></tbody>').appendTo(elemTable).attr('id', id + '-tbody').attr('id', id + '-tbody');
         let elemTHRow      = $('<tr></tr>').appendTo(elemTHead).addClass('fixed');
 
-        getFieldsPicklistsData(settings.grid[id], columns.fields, function(picklistsData) {
+        getFieldsPicklistsData(settings[id], columns.fields, function(picklistsData) {
 
             for(let field of columns.fields) {
                 field.id       = field.__self__.split('/').pop();
                 field.preserve = false;
-                if(!includePanelTableColumn(field.id, field.name, settings.grid[id], settings.grid[id].columns.length)) {
+                if(!includePanelTableColumn(field.id, field.name, settings[id], settings[id].columns.length)) {
                     field.preserve = true;
                 } else if(field.visibility === 'NEVER') {
                     field.preserve   = true;
                     field.visibility = 'ALWAYS';
                 }
-                settings.grid[id].columns.push(field);
+                settings[id].columns.push(field);
             }
 
-            if(settings.grid[id].tableHeaders) elemTHead.prependTo(elemTable);
+            if(settings[id].tableHeaders) elemTHead.prependTo(elemTable);
 
-            if(!isBlank(settings.grid[id].sortBy)) {
+            if(!isBlank(settings[id].sortBy)) {
                 for(let row of rows) {
-                    row.sort = getFieldValueFromResponseData(settings.grid[id].sortBy, row.rowData) || '';
+                    row.sort = getFieldValueFromResponseData(settings[id].sortBy, row.rowData) || '';
                 }
-                if(settings.grid[id].sortType.toLowerCase() === 'integer') {
+                if(settings[id].sortType.toLowerCase() === 'integer') {
                     for(let row of rows) row.sort = Number(row.sort);
                 }
-                sortArray(rows, 'sort', settings.grid[id].sortType, settings.grid[id].sortDirection);
+                sortArray(rows, 'sort', settings[id].sortType, settings[id].sortDirection);
             }
 
-            if(!isBlank(settings.grid[id].sortOrder)) {
-                for(let sort of settings.grid[id].sortOrder) {
+            if(!isBlank(settings[id].sortOrder)) {
+                for(let sort of settings[id].sortOrder) {
                     for(let row of rows) {
                         row.sort = getFieldValueFromResponseData(sort.sortBy, row.rowData) || '';
                     }
@@ -4489,24 +4611,24 @@ function insertGridData(id) {
             }
 
             if(rows.length > 0 ) {
-                if(!isBlank(settings.grid[id].groupBy)) {
+                if(!isBlank(settings[id].groupBy)) {
                     for(let row of rows) {
-                        row.group = getGridRowValue(row, settings.grid[id].groupBy, '', 'title');
+                        row.group = getGridRowValue(row, settings[id].groupBy, '', 'title');
                     }
                     sortArray(rows, 'group', 'string', 'ascending');
                 }
             }
 
-            if(!settings.grid[id].rotate) {
+            if(!settings[id].rotate) {
 
                 elemTable.addClass('fixed-header');
                 
-                // if(settings.grid[id].editable || settings.grid[id].multiSelect) {
-                if(settings.grid[id].multiSelect) {
+                // if(settings[id].editable || settings[id].multiSelect) {
+                if(settings[id].multiSelect) {
 
                     let elemHeadCell = $('<th></th>').appendTo(elemTHRow);
                     
-                    if(settings.grid[id].multiSelect) {
+                    if(settings[id].multiSelect) {
 
                         elemHeadCell.addClass('table-check-box');
 
@@ -4525,59 +4647,37 @@ function insertGridData(id) {
 
                 }
 
-                for(let column of settings.grid[id].columns) {
+                for(let column of settings[id].columns) {
                     let elemCell = $('<th></th>').appendTo(elemTHRow).html(column.name);
-                    setFieldDataAndClasses(elemCell, column, settings.grid[id].editable);
+                    setFieldDataAndClasses(elemCell, column, settings[id].editable);
                     if(column.preserve) elemCell.addClass('hidden');
                     if(column.required) elemCell.addClass('required');
                 }
 
                 let groupName = null;
-                let groupSpan = settings.grid[id].columns.length;
+                
+                settings[id].groupSpan = settings[id].columns.length;
 
-                if(settings.grid[id].editable && settings.grid[id].multiSelect) groupSpan++;
+                if(settings[id].editable && settings[id].multiSelect) settings[id].groupSpan++;
 
                 for(let row of rows) {
 
-                    if(!isBlank(settings.grid[id].groupBy)) {
-
-                        if(groupName !== row.group) {
-
-                            let elemGroup = $('<tr></tr>').appendTo(elemTBody)
-                                .addClass('table-group');
-
-                            let elemGroupTitle = $('<td></td>').appendTo(elemGroup)
-                                .addClass('table-group-title')
-                                .attr('colspan', groupSpan)
-                                .html(isBlank(row.group) ? 'n/a' : row.group)
-                                .click(function() {
-                                    $(this).toggleClass('collapsed');
-                                    if($(this).hasClass('collapsed')) {
-                                        $(this).parent().nextUntil('.table-group').hide();
-                                    } else {
-                                        $(this).parent().nextUntil('.table-group').show();
-                                    }
-                                });
-
-                            if(settings.grid[id].collapseContents) elemGroupTitle.addClass('collapsed');
-
-                        }
-
+                    if(!isBlank(settings[id].groupBy)) {
+                        if(groupName !== row.group) insertGridGroup(id, row.group);
                         groupName = row.group;
-
                     }
 
                     insertGridRow(id, row, picklistsData);
 
                 }
 
-                insertAllPicklistData(settings.grid[id], picklistsData, elemTBody);
+                insertAllPicklistData(settings[id], picklistsData, elemTBody);
 
             } else {
 
                 elemTable.addClass('rotated');
 
-                for(let column of settings.grid[id].columns) {
+                for(let column of settings[id].columns) {
 
                     let elemTableRow = $('<tr></tr>').appendTo(elemTBody)
                         .addClass('content-item')
@@ -4600,14 +4700,14 @@ function insertGridData(id) {
                 }
             }
 
-            if(settings.grid[id].editable) {
+            if(settings[id].editable) {
                 if(hasPermission(permissions, 'edit_grid'       )) { $('#' + id + '-action-save'  ).removeClass('hidden'); } else { $('#' + id + '-action-save'  ).remove(); }
                 if(hasPermission(permissions, 'add_to_grid'     )) { $('#' + id + '-action-add'   ).removeClass('hidden'); } else { $('#' + id + '-action-add'   ).remove(); }
                 if(hasPermission(permissions, 'add_to_grid'     )) { $('#' + id + '-action-clone' ).removeClass('hidden'); } else { $('#' + id + '-action-clone' ).remove(); }
                 if(hasPermission(permissions, 'delete_from_grid')) { $('#' + id + '-action-remove').removeClass('hidden'); } else { $('#' + id + '-action-remove').remove(); }
             }
 
-            finishPanelContentUpdate(id, settings.grid[id]);
+            finishPanelContentUpdate(id, settings[id]);
             insertGridDataDone(id, rows, columns);
 
         });
@@ -4616,13 +4716,48 @@ function insertGridData(id) {
 
 }
 function insertGridDataDone(id, rows, columns) {}
-function insertGridRow(id, row, picklistsData) {
+function insertGridGroup(id, title) {
+
+    let elemTBody = $('#' + id + '-tbody');
+    let groupTitle = isBlank(title) ? 'n/a' : title;
+
+    let elemGroup = $('<tr></tr>').appendTo(elemTBody)
+        .addClass('table-group')
+        .attr('data-title', groupTitle);
+
+    let elemGroupTitle = $('<td></td>').appendTo(elemGroup)
+        .addClass('table-group-title')
+        .attr('colspan', settings[id].groupSpan)
+        .html(groupTitle)
+        .click(function() {
+            $(this).toggleClass('collapsed');
+            if($(this).hasClass('collapsed')) {
+                $(this).parent().nextUntil('.table-group').addClass('hidden');
+            } else {
+                $(this).parent().nextUntil('.table-group').removeClass('hidden');
+            }
+        });
+
+    if(settings[id].collapseContents) elemGroupTitle.addClass('collapsed');
+
+}
+function insertGridRow(id, row, picklistsData, groupName) {
 
     let elemTBody = $('#' + id + '-tbody');
 
     let elemTableRow = $('<tr></tr>').appendTo(elemTBody)
         .addClass('content-item')
         .attr('data-link', '');
+
+    if(!isBlank(groupName)) {
+        elemTBody.children('.table-group').each(function() {
+            let elemGroup = $(this);
+            if(elemGroup.attr('data-title') === groupName) {
+                let elemLast = elemGroup.nextUntil('.table-group').last();
+                if(elemLast.length > 0) elemTableRow.insertAfter(elemLast);
+            }
+        });
+    }
 
     if(isBlank(row)) {
         elemTableRow.addClass('new');
@@ -4634,13 +4769,13 @@ function insertGridRow(id, row, picklistsData) {
         }
     }
 
-    if(settings.grid[id].collapseContents) {
-        if(!isBlank(settings.grid[id].groupBy)) {
+    if(settings[id].collapseContents) {
+        if(!isBlank(settings[id].groupBy)) {
             elemTableRow.hide();
         }
     }
 
-    if(settings.grid[id].multiSelect) {
+    if(settings[id].multiSelect) {
 
         $('<td></td>').appendTo(elemTableRow)
             .html('<div class="icon icon-check-box"></div>')
@@ -4649,14 +4784,14 @@ function insertGridRow(id, row, picklistsData) {
 
     }
 
-    for(let field of settings.grid[id].columns) {
+    for(let field of settings[id].columns) {
 
         let elemCell = $('<td></td>').appendTo(elemTableRow);
 
         if(field.preserve) elemCell.addClass('hidden');
             
-        if(isBlank(row)) insertField(settings.grid[id], elemCell, field, null, picklistsData, [], []);
-        else insertField(settings.grid[id], elemCell, field, row.rowData, picklistsData, [], []);
+        if(isBlank(row)) insertField(settings[id], elemCell, field, null, picklistsData, [], []);
+        else insertField(settings[id], elemCell, field, row.rowData, picklistsData, [], []);
         
         if(field.editability === 'NEVER') {
             let value  = '';
@@ -4675,9 +4810,9 @@ function setGridRowEvents(id, elemRow) {
 
     elemRow.click(function(e) {
         clickContentItemSelect($(this), e);
-        if(!isBlank(settings.grid[id].onClickItem)) settings.grid[id].onClickItem($(this));
+        if(!isBlank(settings[id].onClickItem)) settings[id].onClickItem($(this));
     }).dblclick(function() {
-        if(!isBlank(settings.grid[id].onDblClickItem)) settings.grid[id].onDblClickItem($(this));
+        if(!isBlank(settings[id].onDblClickItem)) settings[id].onDblClickItem($(this));
     });
 
     let elemCheckbox = elemRow.children('td.table-check-box');
@@ -4783,7 +4918,7 @@ function deleteGridRows(id) {
 }
 function saveGridData(id) {
 
-    if(!settings.grid[id].autoSave) appendOverlay(false);
+    if(!settings[id].autoSave) appendOverlay(false);
 
     let requests    = [];
     let elemTBody   = $('#' + id + '-tbody');
@@ -4805,7 +4940,7 @@ function saveGridData(id) {
 
         let elemRow = $(this);
         let params  = {
-            link  : settings.grid[id].link, 
+            link  : settings[id].link, 
             data  : [],
             index : index++
         } 
@@ -4829,7 +4964,7 @@ function saveGridData(id) {
         if(!elemRow.hasClass('new')) {
 
             let params = {
-                link  : settings.grid[id].link, 
+                link  : settings[id].link, 
                 rowId : rowId, 
                 data  : [] 
             }            
@@ -4874,13 +5009,21 @@ function saveGridData(id) {
         $('#overlay').hide();
         updateListCalculations(id);
         updatePanelCalculations(id);
+
+        if(elemTBody.children().length === 0) {
+            $('#' + id + '-content').hide();
+            $('#' + id + '-select-all').addClass('icon-check-box').removeClass('icon-check-box-checked');
+            $('#' + id + '-no-data').show();
+        }
+
+        if(!isBlank(settings[id].afterSave)) settings[id].afterSave(id);
         
     });
 
 }
 function autoSaveGridData(id) {
 
-    if(settings.grid[id].autoSave) saveGridData(id);
+    if(settings[id].autoSave) saveGridData(id);
 
 }
 function cleanupEmptyGridGroups(id) {
@@ -4919,7 +5062,7 @@ function insertBOM(link , params) {
     if(!isBlank(params.fieldsIn)) hideDetails = false;
     if(!isBlank(params.fieldsEx)) hideDetails = false;
 
-    settings.bom[id] = getPanelSettings(link, params, {
+    settings[id] = getPanelSettings(link, params, {
         headerLabel : 'BOM',
         contentSize : 'm',
     }, [
@@ -4930,7 +5073,8 @@ function insertBOM(link , params) {
         [ 'endItemValue'        , ''    ],
         [ 'getFlatBOM'          , false ],
         [ 'goThere'             , false ],
-        [ 'hideDetails'         , hideDetails  ],
+        [ 'hideDescriptor'      , false ],
+        [ 'hideDetails'         , hideDetails ],
         [ 'includeBOMPartList'  , false ],
         [ 'path'                , false ],
         [ 'position'            , true  ],
@@ -4940,29 +5084,39 @@ function insertBOM(link , params) {
         [ 'showRestricted'      , false ],
         [ 'toggles'             , false ],
         [ 'viewSelector'        , false ],
-        [ 'viewerSelection'     , false ]
+        [ 'viewerSelection'     , false ],
+        [ 'downloadFiles'       , false ],
+        [ 'downloadRequests'    ,     1 ],
+        [ 'downloadPatterns'    , []    ],
+        [ 'downloadFormats'     , [
+            { label : 'PDF'   , filter : ['.pdf']         , tooltip : '' },
+            { label : 'STEP'  , filter : ['.step', '.stp'], tooltip : 'File suffix stp and step will be taken into account' },
+            { label : 'Office', filter : ['.docx', '.doc', 'xls', 'xlsx', 'ppt', 'pptx'], tooltip : 'This will download all files with suffix doc, docx, xls, xlsx, ppt and pptx' },
+        ]]
     ]);
 
-    settings.bom[id].load = function() { changeBOMView(id); }
+    if(isiPad) settings[id].downloadFiles = false;
+
+    settings[id].load = function() { changeBOMView(id); }
 
     if(!isBlank(params.endItem)) {
-        if(!isBlank(params.endItem.fieldId)) settings.bom[id].endItemFieldId = params.endItem.fieldId;
-        if(!isBlank(params.endItem.value  )) settings.bom[id].endItemValue   = params.endItem.value;
+        if(!isBlank(params.endItem.fieldId)) settings[id].endItemFieldId = params.endItem.fieldId;
+        if(!isBlank(params.endItem.value  )) settings[id].endItemValue   = params.endItem.value;
     }
 
-    genPanelTop(id, settings.bom[id], 'bom');
-    genPanelHeader(id, settings.bom[id]);
-    genPanelOpenSelectedInPLMButton(id, settings.bom[id]);
-    genPanelSelectionControls(id, settings.bom[id]);
+    genPanelTop                    (id, settings[id], 'bom');
+    genPanelHeader                 (id, settings[id]);
+    genPanelOpenSelectedInPLMButton(id, settings[id]);
+    genPanelSelectionControls      (id, settings[id]);
 
-    if(settings.bom[id].goThere) {
+    if(settings[id].goThere) {
 
-        $('<div></div>').appendTo(genPanelToolbar(id, settings.bom[id], 'controls'))
+        $('<div></div>').appendTo(genPanelToolbar(id, settings[id], 'controls'))
             .addClass('button')
             .addClass('icon')
             .addClass('icon-go-there')
             .addClass('xs')
-            .addClass('bom-single-select-action')
+            .addClass('single-select-action')
             .attr('title', 'Open this view for the selected item')
             .click(function() {
                 clickBOMGoThere($(this));
@@ -4970,12 +5124,32 @@ function insertBOM(link , params) {
 
     }
 
-    genPanelToggleButtons(id, settings.bom[id], 
+    if(settings[id].downloadFiles) {
+
+        let elemToolbar = genPanelToolbar(id, settings[id], 'controls');
+
+        $('<div></div>').appendTo(elemToolbar)
+            .addClass('disabled')
+            .addClass('button')
+            .addClass('icon')
+            .addClass('icon-download')
+            .attr('title', 'Toggle panel enabling file downloads')
+            .attr('id', id + '-download-files') 
+            .click(function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                if($(this).hasClass('disabled')) return;
+                treeToggleDownloadPanelAndColumn(id, settings[id]);
+            });
+
+    }    
+
+    genPanelToggleButtons(id, settings[id], 
         function() {   expandAllNodes(id); }, 
         function() { collapseAllNodes(id); }
     );
 
-    $('<select></select>').appendTo(genPanelToolbar(id, settings.bom[id], 'controls'))
+    $('<select></select>').appendTo(genPanelToolbar(id, settings[id], 'controls'))
         .addClass('bom-view-selector')
         .addClass('button')
         .attr('id', id + '-view-selector')
@@ -4996,24 +5170,23 @@ function insertBOM(link , params) {
     // let showRestricted      = false;     // When set to true, red lock icons will be shown if an item's BOM contains items that are not accessilbe for the user due to access permissions
     // let views               = false;     // Adds drop down menu to select from the available PLM BOM views
 
-    // settings.bom[id].position           = position;
-    // settings.bom[id].quantity           = quantity;
-    // settings.bom[id].hideDetails        = hideDetails;
-    // settings.bom[id].showRestricted     = showRestricted;
-    // settings.bom[id].selectItems        = selectItems;
-    // settings.bom[id].selectUnique       = selectUnique;
-    // settings.bom[id].endItemFieldId     = null;
-    // settings.bom[id].endItemValue       = null;
+    // settings[id].position           = position;
+    // settings[id].quantity           = quantity;
+    // settings[id].hideDetails        = hideDetails;
+    // settings[id].showRestricted     = showRestricted;
+    // settings[id].selectItems        = selectItems;
+    // settings[id].selectUnique       = selectUnique;
+    // settings[id].endItemFieldId     = null;
+    // settings[id].endItemValue       = null;
 
 
-    genPanelResizeButton(id, settings.bom[id]);
-    genPanelSearchInput(id, settings.bom[id]);
-    genPanelResetButton(id, settings.bom[id]);
-    genPanelReloadButton(id, settings.bom[id]);
+    genPanelResizeButton(id, settings[id]);
+    genPanelSearchInput (id, settings[id]);
+    genPanelResetButton (id, settings[id]);
+    genPanelReloadButton(id, settings[id]);
+    genPanelContents    (id, settings[id]);
 
-    genPanelContents(id, settings.bom[id]);
-
-    if(settings.bom[id].path) {
+    if(settings[id].path) {
 
         $('<div></div>').appendTo($('#' + id))
             .attr('id', id + '-bom-path')
@@ -5052,7 +5225,7 @@ function insertBOM(link , params) {
     } 
 
     insertBOMDone(id);
-    getBOMTabViews(id, settings.bom[id]);
+    getBOMTabViews(id, settings[id]);
 
 }
 function getBOMTabViews(id, settings) {
@@ -5094,20 +5267,22 @@ function getBOMTabViews(id, settings) {
             for(let field of bomView.fields) {
                 
                 field.included = false;
+                field.sortFieldsIncluded = bomView.fields.length + 1;
 
                 if(field.displayName !== 'Descriptor') {
                     if(includePanelTableColumn(field.fieldId, field.displayName, settings, columnsCount++)) {
                         if(!settings.hideDetails) {
                             field.included = true;
+                            field.sortFieldsIncluded = settings.fieldsIn.indexOf(field.displayName) + 1;
                         }      
                     }
-                }
+                } else field.sortFieldsIncluded = 0;
 
                 view.columns.push(field);
 
                 switch(field.fieldId) {
-                    case settings.fieldIdPartNumber   : view.urns.partNumber  = field.__self__.urn; break;
-                    case config.items.fieldIdNumber   : if(isBlank(view.urns.partNumber)) view.urns.partNumber  = field.__self__.urn; break;
+                    case settings.fieldIdPartNumber   : view.urns.partNumber   = field.__self__.urn; break;
+                    case common.workspaces.items.fieldIdNumber : if(isBlank(view.urns.partNumber)) view.urns.partNumber  = field.__self__.urn; break;
                     case 'QUANTITY'                   : view.urns.quantity    = field.__self__.urn; break;
                     case settings.endItemFieldId      : view.urns.endItem     = field.__self__.urn; break;
                     default:
@@ -5119,6 +5294,7 @@ function getBOMTabViews(id, settings) {
 
             }
 
+            sortArray(view.columns, 'sortFieldsIncluded', 'integer');
             settings.bomViews.push(view);
         
         }
@@ -5133,46 +5309,53 @@ function getBOMTabViews(id, settings) {
 function insertBOMDone(id) {}
 function changeBOMView(id) {
 
-    settings.bom[id].timestamp = startPanelContentUpdate(id);
-    settings.bom[id].viewId    = $('#' +  id + '-view-selector').val();
-    settings.bom[id].indexEdge = 0;
+    settings[id].timestamp = startPanelContentUpdate(id);
+    settings[id].viewId    = $('#' +  id + '-view-selector').val();
+    settings[id].indexEdge = 0;
 
     let elemBOM         = $('#' + id);
     let selectedItems   = [];
 
     let params = {
-        link          : settings.bom[id].link,
-        depth         : settings.bom[id].depth,
-        revisionBias  : settings.bom[id].revisionBias,
-        viewId        : settings.bom[id].viewId,
-        timestamp     : settings.bom[id].timestamp
+        link          : settings[id].link,
+        depth         : settings[id].depth,
+        revisionBias  : settings[id].revisionBias,
+        viewId        : settings[id].viewId,
+        timestamp     : settings[id].timestamp
     }
 
     let requests = [
         $.get('/plm/bom', params),
-        $.get('/plm/workspaces', { useCache : true })
+        $.get('/plm/workspaces', { useCache : true }),
+        $.get('/plm/details', params)  // required for downloadFiles
     ];
 
-    if(settings.bom[id].getFlatBOM) requests.push($.get('/plm/bom-flat', params));
-    if(settings.bom[id].headerLabel == 'descriptor') requests.push($.get('/plm/descriptor', params));
+    if(settings[id].getFlatBOM) requests.push($.get('/plm/bom-flat', params));
+    if(settings[id].downloadFiles) requests.push($.get('/services/storage/folders', { path : 'downloads' }));
 
-    for(let request of settings.bom[id].additionalRequests) requests.push(request);
+    for(let request of settings[id].additionalRequests) requests.push(request);
 
     Promise.all(requests).then(function(responses) {
 
-        if(stopPanelContentUpdate(responses[0], settings.bom[id])) return;
+        if(stopPanelContentUpdate(responses[0], settings[id])) return;
+
+        settings[id].downloadFolders = [];
 
         for(let response of responses) {
-            if(response.url.indexOf('/descriptor?') === 0) settings.bom[id].descriptor = response.data;
+            if(response.url.indexOf('/details?') === 0) {
+                settings[id].descriptor = response.data.title;
+                settings[id].version    = response.data.version;
+            } else if(response.url.indexOf('/storage/folders') === 0) settings[id].downloadFolders = response.folders;
         }
 
-        for(let view of settings.bom[id].bomViews) {
-            if( settings.bom[id].viewId == view.id) {
-                settings.bom[id].columns             = view.columns;
-                settings.bom[id].fieldURNPartNumber  = view.urns.partNumber;
-                settings.bom[id].fieldURNQuantity    = view.urns.quantity;
-                settings.bom[id].fieldURNEndItem     = view.urns.endItem;
-                settings.bom[id].fieldURNSelectItems = view.urns.selectItems;
+        for(let view of settings[id].bomViews) {
+            if( settings[id].viewId == view.id) {
+                settings[id].columns              = view.columns;
+                settings[id].fieldURNPartNumber   = view.urns.partNumber;
+                settings[id].fieldURNLastModified = view.urns.lastModified;
+                settings[id].fieldURNQuantity     = view.urns.quantity;
+                settings[id].fieldURNEndItem      = view.urns.endItem;
+                settings[id].fieldURNSelectItems  = view.urns.selectItems;
                 break;
             }
         }
@@ -5182,15 +5365,17 @@ function changeBOMView(id) {
         let elemTable = $('<table></table').appendTo($('#' + id + '-content'))
             .attr('id', id + '-table')
             .addClass('bom-table')
+            // .addClass('tree-table')
+            // .addClass('tree')
             .addClass('fixed-header');
 
         let elemTHead = $('<thead></thead>').appendTo(elemTable).attr('id', id + '-thead').addClass('bom-thead');
         let elemTBody = $('<tbody></tbody>').appendTo(elemTable).attr('id', id + '-tbody').addClass('bom-tbody');
             
-        if(!settings.bom[id].tableHeaders) elemTHead.hide();
+        if(!settings[id].tableHeaders) elemTHead.hide();
 
-        if(!isBlank(settings.bom[id].selectItems.values)) {
-            settings.bom[id].selectItems.values = settings.bom[id].selectItems.values.map(function(item) { 
+        if(!isBlank(settings[id].selectItems.values)) {
+            settings[id].selectItems.values = settings[id].selectItems.values.map(function(item) { 
                 return item.toLowerCase(); 
             }); 
         }
@@ -5199,15 +5384,15 @@ function changeBOMView(id) {
         insertNextBOMLevel(id, elemTBody, responses[0].data, responses[0].data.root, 1, '', selectedItems, responses[1].data.items);
         enableBOMToggles(id);
 
-        if(settings.bom[id].collapseContents) collapseAllNodes(id);
+        if(settings[id].collapseContents) collapseAllNodes(id);
 
         if(!elemBOM.hasClass('no-bom-counters')) { $('#' + id + '-bom-counters').show(); }
 
         let dataFlatBOM     = null;
         let dataAdditional  = [];
-        let indexAdditional = 2;
+        let indexAdditional = 3;
 
-        if(settings.bom[id].getFlatBOM) dataFlatBOM = responses[indexAdditional++].data;
+        if(settings[id].getFlatBOM) dataFlatBOM = responses[indexAdditional++].data;
 
         while (indexAdditional < responses.length) {
             dataAdditional.push(responses[indexAdditional++]);
@@ -5215,31 +5400,48 @@ function changeBOMView(id) {
 
         let responseData = { bomPartsList : [] } ;
 
-        if(settings.bom[id].includeBOMPartList) responseData.bomPartsList = getBOMPartsList(settings.bom[id], responses[0].data)
+        if(settings[id].includeBOMPartList) responseData.bomPartsList = getBOMPartsList(settings[id], responses[0].data)
 
-        if(selectedItems.length > 0) selectedItems = extendBOMPartsList(settings.bom[id], selectedItems);
+        if(selectedItems.length > 0) selectedItems = extendBOMPartsList(settings[id], selectedItems);
 
-        changeBOMViewDone(id, settings.bom[id], responses[0].data, selectedItems, dataFlatBOM, dataAdditional, responseData.bomPartsList);
-        finishPanelContentUpdate(id, settings.bom[id], null, null, responseData);
+
+        let elemDownload = $('#' + id + '-download-files');
+
+        if(elemDownload.length > 0) elemDownload.removeClass('disabled');
+
+        changeBOMViewDone(id, settings[id], responses[0].data, selectedItems, dataFlatBOM, dataAdditional, responseData.bomPartsList);
+        finishPanelContentUpdate(id, settings[id], null, null, responseData);
 
     });
 
 }
-function changeBOMViewDone(id, settings, bom, selectedItems, dataFlatBOM, dataAdditional) {}
+function changeBOMViewDone(id, settings, bom, selectedItems, dataFlatBOM, dataAdditional, bomPartsList) {}
 function setBOMHeaders(id, elemTHead) {
 
     let elemTHRow = $('<tr></tr>').appendTo(elemTHead).attr('id', id + '-thead-row');
 
     $('<th></th>').appendTo(elemTHRow).html('').addClass('bom-color');
-    $('<th></th>').appendTo(elemTHRow).html('Item').addClass('bom-first-col');
+    let elemFirst = $('<th></th>').appendTo(elemTHRow).addClass('bom-first-col');
 
-    if(settings.bom[id].showRestricted) $('<th></th>').appendTo(elemTHRow).html('').addClass('bom-column-locks');
-    
-    for(let column of settings.bom[id].columns) {
+    if(!settings[id].hideDescriptor) elemFirst.html('Item');
+
+    if(settings[id].showRestricted) $('<th></th>').appendTo(elemTHRow).html('').addClass('bom-column-locks');
+
+    let index = 0;
+
+    for(let column of settings[id].columns) {
         if(column.included) {
-            $('<th></th>').appendTo(elemTHRow)
-                .html(column.displayName)
-                .addClass('bom-column-' + column.fieldId.toLowerCase());
+            if(!settings[id].hideDescriptor || (index > 0)) {
+                $('<th></th>').appendTo(elemTHRow)
+                    .html(column.displayName)
+                    .addClass('bom-column-' + column.fieldId.toLowerCase())
+                    .addClass('tree-column-' + column.fieldId.toLowerCase());
+            } else {
+                elemFirst.html(column.displayName)
+                    .addClass('bom-column-' + column.fieldId.toLowerCase())
+                    .addClass('tree-column-' + column.fieldId.toLowerCase());
+            }
+            index++;
         }
     }
 
@@ -5249,13 +5451,13 @@ function insertNextBOMLevel(id, elemTable, bom, parent, parentQuantity, numberPa
     let result    = { hasChildren : false, hasRestricted : false};
     let firstLeaf = true;
 
-    for(let i = settings.bom[id].indexEdge; i < bom.edges.length; i++) {
+    for(let i = settings[id].indexEdge; i < bom.edges.length; i++) {
 
         let edge = bom.edges[i];
 
         if(edge.parent === parent) {
 
-            if(i === settings.bom[id].indexEdge + 1) settings.bom[id].indexEdge = i;
+            if(i === settings[id].indexEdge + 1) settings[id].indexEdge = i;
 
             let node = {}
                         
@@ -5266,7 +5468,7 @@ function insertNextBOMLevel(id, elemTable, bom, parent, parentQuantity, numberPa
                 }
             }
             
-            node.quantity = getBOMEdgeValue(edge, settings.bom[id].fieldURNQuantity, null, 0);
+            node.quantity = getBOMEdgeValue(edge, settings[id].fieldURNQuantity, null, 0);
             
             if((typeof node.restricted === 'undefined') || (node.restricted === false)) {
 
@@ -5283,15 +5485,15 @@ function insertNextBOMLevel(id, elemTable, bom, parent, parentQuantity, numberPa
 
                     switch(field.metaData.urn) {
 
-                        case settings.bom[id].fieldURNPartNumber:
+                        case settings[id].fieldURNPartNumber:
                             node.partNumber = fieldValue;
                             break;
 
-                        case settings.bom[id].fieldURNEndItem:
+                        case settings[id].fieldURNEndItem:
                             node.endItem = fieldValue;
                             break;
 
-                        case settings.bom[id].fieldURNSelectItems:
+                        case settings[id].fieldURNSelectItems:
                             node.selectItems = fieldValue;
                             edge.selectItems = fieldValue;
                             break;
@@ -5300,9 +5502,9 @@ function insertNextBOMLevel(id, elemTable, bom, parent, parentQuantity, numberPa
 
                 }
 
-                if(!isBlank(settings.bom[id].fieldURNSelectItems)) {
+                if(!isBlank(settings[id].fieldURNSelectItems)) {
                     for(let fieldEdge of edge.fields) {
-                        if(fieldEdge.metaData.urn === settings.bom[id].fieldURNSelectItems) {
+                        if(fieldEdge.metaData.urn === settings[id].fieldURNSelectItems) {
                             edge.selectItems = (typeof fieldEdge.value === 'object') ? fieldEdge.value.title : fieldEdge.value;
                             node.selectItems = edge.selectItems;
                         }
@@ -5325,8 +5527,8 @@ function insertNextBOMLevel(id, elemTable, bom, parent, parentQuantity, numberPa
 
                 for(let ws of workspaces) if(ws.link === workspaceLink) { workspace = ws.title; break; }
 
-                if((settings.bom[id].workspacesIn.length === 0) || ( settings.bom[id].workspacesIn.includes(workspace))) {
-                    if((settings.bom[id].workspacesEx.length === 0) || (!settings.bom[id].workspacesEx.includes(workspace))) {
+                if((settings[id].workspacesIn.length === 0) || ( settings[id].workspacesIn.includes(workspace))) {
+                    if((settings[id].workspacesEx.length === 0) || (!settings[id].workspacesEx.includes(workspace))) {
 
                         let elemRow = $('<tr></tr>').appendTo(elemTable)
                             .attr('data-number',         edge.itemNumber)
@@ -5355,33 +5557,32 @@ function insertNextBOMLevel(id, elemTable, bom, parent, parentQuantity, numberPa
                                 updateBOMPath($(this));
                                 togglePanelToolbarActions($(this));
                                 updatePanelCalculations(id);
-                                if(settings.bom[id].viewerSelection) selectInViewer(id);
+                                if(settings[id].viewerSelection) selectInViewer(id);
                                 clickBOMItem($(this), e);
-                                if(!isBlank(settings.bom[id].onClickItem)) settings.bom[id].onClickItem($(this));
+                                if(!isBlank(settings[id].onClickItem)) settings[id].onClickItem($(this));
                             }).dblclick(function(e) {
                                 e.preventDefault();
                                 e.stopPropagation();
-                                if(!isBlank(settings.bom[id].onDblClickItem)) settings.bom[id].onDblClickItem($(this));
-                                else if(settings.bom[id].openOnDblClick) openItemByLink($(this).attr('data-link'));
+                                if(!isBlank(settings[id].onDblClickItem)) settings[id].onDblClickItem($(this));
+                                else if(settings[id].openOnDblClick) openItemByLink($(this).attr('data-link'));
                             });
-                
 
                         let elemColor = $('<td></td>').appendTo(elemRow).addClass('bom-color');
-                        let elemCell  = $('<td></td>').appendTo(elemRow).addClass('bom-first-col');
+                        let elemFirst = $('<td></td>').appendTo(elemRow).addClass('bom-first-col');
 
-                        if(settings.bom[id].position) {
-
-                            $('<span></span>').appendTo(elemCell)
+                        if(settings[id].position) {
+                            $('<span></span>').appendTo(elemFirst)
                                 .addClass('bom-number')
                                 .html(edge.depth + '.' + edge.itemNumber);
-
                         }
 
-                        $('<span></span>').appendTo(elemCell)
-                            .addClass('bom-descriptor')
-                            .html(node.item.title);
+                        if(!settings[id].hideDescriptor) {
+                            $('<span></span>').appendTo(elemFirst)
+                                .addClass('bom-descriptor')
+                                .html(node.item.title);
+                        }
 
-                        // if(settings.bom[id].quantity) {
+                        // if(settings[id].quantity) {
 
                         //     $('<td></td>').appendTo(elemRow)
                         //         .addClass('bom-quantity')
@@ -5393,32 +5594,43 @@ function insertNextBOMLevel(id, elemTable, bom, parent, parentQuantity, numberPa
                             .addClass('bom-column-icon')
                             .addClass('bom-column-locks');
 
-                        if(settings.bom[id].showRestricted) elemCellLocks.appendTo(elemRow);
+                        if(settings[id].showRestricted) elemCellLocks.appendTo(elemRow);
 
-                        for(let column of settings.bom[id].columns) {
+                        let index = 0;
+
+                        for(let column of settings[id].columns) {
 
                             if(column.included) {
 
-                                let value = '';
+                                let value    = '';
+                                let elemCell = $('<td></td>');
+                                
+                                if(!settings[id].hideDescriptor || (index > 0)) {
+                                    elemCell.appendTo(elemRow);
+                                } else {
+                                    elemCell = $('<span></span>').appendTo(elemFirst).addClass('bom-descriptor');
+                                }
 
                                 if(column.fieldTab === 'STANDARD_BOM') value = getBOMEdgeValue(edge, column.__self__.urn, null, '');
                                 else value = getBOMCellValue(edge.child, column.__self__.urn, bom.nodes, 'title');
 
-                                $('<td></td>').appendTo(elemRow)
-                                    .html(value)
-                                    .addClass('bom-column-' + column.fieldId.toLowerCase());
+                                elemCell.html(value)
+                                    .addClass('bom-column-'  + column.fieldId.toLowerCase())
+                                    .addClass('tree-column-' + column.fieldId.toLowerCase());
+
+                                index++;
 
                             }
 
                         }
 
-                        if(!isBlank(settings.bom[id].selectItems.values)) {
+                        if(!isBlank(settings[id].selectItems.values)) {
                             if(!isBlank(edge.selectItems)) {
-                                if(settings.bom[id].selectItems.values.indexOf(edge.selectItems.toLowerCase()) > -1) {
+                                if(settings[id].selectItems.values.indexOf(edge.selectItems.toLowerCase()) > -1) {
 
                                     let selectItem = true;
 
-                                    if(settings.bom[id].selectUnique) {
+                                    if(settings[id].selectUnique) {
                                         for(let selectedItem of selectedItems) {
                                             if(selectedItem.node.item.link === node.item.link) {
                                                 selectItem = false;
@@ -5439,8 +5651,8 @@ function insertNextBOMLevel(id, elemTable, bom, parent, parentQuantity, numberPa
 
                         }
 
-                        if(!isBlank(settings.bom[id].fieldURNEndItem)) {
-                            isEndItem = (settings.bom[id].endItemValue.toString().toLowerCase() === node.endItem.toString().toLowerCase());
+                        if(!isBlank(settings[id].fieldURNEndItem)) {
+                            isEndItem = (settings[id].endItemValue.toString().toLowerCase() === node.endItem.toString().toLowerCase());
                         }
 
                         let itemBOM = (isEndItem) ? { hasChildren : false, hasRestricted : false } : insertNextBOMLevel(id, elemTable, bom, urnEdgeChild, node.quantity * parentQuantity, numberPath + edge.itemNumber + '.', selectedItems, workspaces);
@@ -5453,7 +5665,7 @@ function insertNextBOMLevel(id, elemTable, bom, parent, parentQuantity, numberPa
 
                         } else {
 
-                            $('<span></span>').prependTo(elemCell)
+                            $('<span></span>').prependTo(elemFirst)
                                 .addClass('bom-nav')
                                 .addClass('icon')
 
@@ -5462,7 +5674,7 @@ function insertNextBOMLevel(id, elemTable, bom, parent, parentQuantity, numberPa
                         }
 
                         if(itemBOM.hasRestricted) {
-                            if(settings.bom[id].showRestricted) {
+                            if(settings[id].showRestricted) {
                                 $('<span></span>').appendTo(elemCellLocks)
                                     .addClass('bom-restricted')
                                     .addClass('icon')
@@ -5576,7 +5788,7 @@ function enableBOMToggles(id) {
 //     updateBOMPath(elemClicked);
 //     togglePanelToolbarActions($(this));
 //     updatePanelCalculations(id);
-//     if(settings.bom[id].viewerSelection) selectInViewer(id);
+//     if(settings[id].viewerSelection) selectInViewer(id);
      
 //     clickBOMDeselectAllDone(elemClicked);
 
@@ -5643,7 +5855,7 @@ function unhideBOMParents(level, elem) {
 //     updateBOMPath(elemClicked);
 //     togglePanelToolbarActions($(this));
 //     updatePanelCalculations(id);
-//     if(settings.bom[id].viewerSelection) selectInViewer(id);
+//     if(settings[id].viewerSelection) selectInViewer(id);
 
 //     clickBOMResetDone(elemClicked);
 
@@ -5843,7 +6055,7 @@ function bomDisplayItem(elemItem) {
     
     elemBOM.animate({ scrollTop: top }, 500);
 
-    if(settings.bom[id].path) updateBOMPath(elemItem);
+    if(settings[id].path) updateBOMPath(elemItem);
 
 }
 function bomDisplayItemByPartNumber(number, select, deselect) {
@@ -6021,7 +6233,7 @@ function insertBOMPartsList(link , params) {
 
     let id = isBlank(params.id) ? 'bom-parts-list' : params.id;
     
-    settings.partList[id] = getPanelSettings(link, params, {
+    settings[id] = getPanelSettings(link, params, {
         headerLabel : 'BOM Parts List'
     }, [
         [ 'bomViewName'     , 'Default View' ],
@@ -6032,20 +6244,20 @@ function insertBOMPartsList(link , params) {
         [ 'viewerSelection' , false          ]
     ]);
 
-    settings.partList[id].load = function() { insertBOMPartsListData(id); }
+    settings[id].load = function() { insertBOMPartsListData(id); }
 
-    genPanelTop(id, settings.partList[id], 'partList');
-    genPanelHeader(id, settings.partList[id]);
-    genPanelOpenSelectedInPLMButton(id, settings.partList[id]);
-    genPanelSelectionControls(id, settings.partList[id]);
-    genPanelSearchInput(id, settings.partList[id]);
-    genPanelResizeButton(id, settings.partList[id]);
-    genPanelReloadButton(id, settings.partList[id]);
-    genPanelContents(id, settings.partList[id]);
+    genPanelTop                    (id, settings[id], 'partList');
+    genPanelHeader                 (id, settings[id]);
+    genPanelOpenSelectedInPLMButton(id, settings[id]);
+    genPanelSelectionControls      (id, settings[id]);
+    genPanelSearchInput            (id, settings[id]);
+    genPanelResizeButton           (id, settings[id]);
+    genPanelReloadButton           (id, settings[id]);
+    genPanelContents               (id, settings[id]);
 
     insertBOMPartsListDone(id);
 
-    getBOMViewId(settings.partList[id]);
+    getBOMViewId(settings[id]);
 
 }
 function insertBOMPartsListDone(id) {}
@@ -6066,48 +6278,48 @@ function getBOMViewId( settings) {
 }
 function insertBOMPartsListData(id) {
 
-    settings.partList[id].timestamp = startPanelContentUpdate(id);
-    settings.partList[id].columns   = [];
+    settings[id].timestamp = startPanelContentUpdate(id);
+    settings[id].columns   = [];
 
     let params = {
-        link          : settings.partList[id].link,
-        depth         : settings.partList[id].depth,
-        revisionBias  : settings.partList[id].revisionBias,
-        viewId        : settings.partList[id].viewId,
-        timestamp     : settings.partList[id].timestamp
+        link          : settings[id].link,
+        depth         : settings[id].depth,
+        revisionBias  : settings[id].revisionBias,
+        viewId        : settings[id].viewId,
+        timestamp     : settings[id].timestamp
     }
 
     $.get('/plm/bom', params, function(response) {
 
-        if(stopPanelContentUpdate(response, settings.partList[id])) return;
+        if(stopPanelContentUpdate(response, settings[id])) return;
 
-        let parts = getBOMPartsList(settings.partList[id], response.data);
+        let parts = getBOMPartsList(settings[id], response.data);
         let items = [];
 
         if(parts.length > 0) {
             for(let field of parts[0].fields) {
-                if(includePanelTableColumn(field.fieldId, field.displayName, settings.partList[id], settings.partList[id].columns.length)) {
-                    settings.partList[id].columns.push(field);
+                if(includePanelTableColumn(field.fieldId, field.displayName, settings[id], settings[id].columns.length)) {
+                    settings[id].columns.push(field);
                 }
             }
         }
 
         for(let part of parts) {
 
-            if((!settings.partList[id].hideParents) || (!part.hasChildren)) {
+            if((!settings[id].hideParents) || (!part.hasChildren)) {
 
-                let contentItem = genPanelContentItem(settings.partList[id], {
+                let contentItem = genPanelContentItem(settings[id], {
                     link  : part.link,
                     title : part.title
                 });
 
                 for(let field of part.fields) {
                 
-                    if(field.fieldId === config.items.fieldIdNumber            ) contentItem.partNumber = field.value;
-                    if(field.fieldId === settings.partList[id].tileImageFieldId) contentItem.imageId    = field.value;
-                    if(field.fieldId === settings.partList[id].tileTitle       ) contentItem.title      = field.value;
-                    if(field.fieldId === settings.partList[id].tileSubtitle    ) contentItem.subtitle   = field.value;
-                    if(field.fieldId === settings.partList[id].groupBy         ) contentItem.group      = field.value;
+                    if(field.fieldId === common.workspaces.items.fieldIdNumber            ) contentItem.partNumber = field.value;
+                    if(field.fieldId === settings[id].tileImageFieldId) contentItem.imageId    = field.value;
+                    if(field.fieldId === settings[id].tileTitle       ) contentItem.title      = field.value;
+                    if(field.fieldId === settings[id].tileSubtitle    ) contentItem.subtitle   = field.value;
+                    if(field.fieldId === settings[id].groupBy         ) contentItem.group      = field.value;
                     if(field.fieldId === 'DESCRIPTOR'                          ) contentItem.descriptor = field.value;
                     if(field.fieldId === 'WF_CURRENT_STATE'                    ) contentItem.status     = field.value;
                 
@@ -6116,7 +6328,7 @@ function insertBOMPartsListData(id) {
                             tileDetail.value = field.fieldData.value;
                         }
                     }
-                    for(let column of settings.partList[id].columns) {
+                    for(let column of settings[id].columns) {
 
                         if(field.fieldId === column.fieldId) {
                         
@@ -6139,7 +6351,7 @@ function insertBOMPartsListData(id) {
         }
 
         insertBOMPartsListDataDone(id, response);
-        finishPanelContentUpdate(id, settings.partList[id], items);
+        finishPanelContentUpdate(id, settings[id], items);
 
     });
 
@@ -6155,7 +6367,7 @@ function insertFlatBOM(link , params) {
 
     let id = isBlank(params.id) ? 'flat-bom' : params.id;
     
-    settings.flatBOM[id] = getPanelSettings(link, params, {
+    settings[id] = getPanelSettings(link, params, {
         headerLabel : 'Flat BOM'
     }, [
         [ 'viewSelector'    , false ],
@@ -6170,15 +6382,15 @@ function insertFlatBOM(link , params) {
         [ 'bomViewId'       , '' ]
     ]);
 
-    settings.flatBOM[id].layout = 'table';
-    settings.flatBOM[id].load   = function() { insertFlatBOMData(id); }
+    settings[id].layout = 'table';
+    settings[id].load   = function() { insertFlatBOMData(id); }
 
-    genPanelTop(id, settings.flatBOM[id], 'flat-bom');
-    genPanelHeader(id, settings.flatBOM[id]);
-    genPanelOpenSelectedInPLMButton(id, settings.flatBOM[id]);
-    genPanelSelectionControls(id, settings.flatBOM[id]);
+    genPanelTop                    (id, settings[id], 'flat-bom');
+    genPanelHeader                 (id, settings[id]);
+    genPanelOpenSelectedInPLMButton(id, settings[id]);
+    genPanelSelectionControls      (id, settings[id]);
 
-    let elemToolbar = genPanelToolbar(id, settings.flatBOM[id], 'controls');
+    let elemToolbar = genPanelToolbar(id, settings[id], 'controls');
 
     $('<select></select>').appendTo(elemToolbar)
         .addClass('flat-bom-view-selector')
@@ -6189,15 +6401,14 @@ function insertFlatBOM(link , params) {
             insertFlatBOMData(id);
         });
 
-    genPanelSearchInput(id, settings.flatBOM[id]);
-    genPanelResizeButton(id, settings.flatBOM[id]);
-    genPanelReloadButton(id, settings.flatBOM[id] );
+    genPanelSearchInput (id, settings[id]);
+    genPanelResizeButton(id, settings[id]);
+    genPanelReloadButton(id, settings[id] );
+    genPanelContents    (id, settings[id]);
 
-    genPanelContents(id, settings.flatBOM[id]);
+    if(settings[id].editable) {
 
-    if(settings.flatBOM[id].editable) {
-
-        let elemToolbar = genPanelToolbar(id, settings.flatBOM[id], 'controls');
+        let elemToolbar = genPanelToolbar(id, settings[id], 'controls');
 
         $('<div></div>').prependTo(elemToolbar)
             .addClass('button')
@@ -6208,13 +6419,13 @@ function insertFlatBOM(link , params) {
             .click(function(e) {
                 e.preventDefault();
                 e.stopPropagation();
-                savePanelTableChanges(id, settings.flatBOM[id]);
+                savePanelTableChanges(id, settings[id]);
             });
 
     }
 
     insertFlatBOMDone(id);        
-    getBOMTabViews(id,  settings.flatBOM[id]);
+    getBOMTabViews(id,  settings[id]);
 
 
     //  Set defaults for optional parameters
@@ -6265,38 +6476,38 @@ function insertFlatBOM(link , params) {
 function insertFlatBOMDone(id) {}
 function insertFlatBOMData(id) {
 
-    settings.flatBOM[id].timestamp = startPanelContentUpdate(id);
-    settings.flatBOM[id].viewId    = $('#' +  id + '-view-selector').val();
+    settings[id].timestamp = startPanelContentUpdate(id);
+    settings[id].viewId    = $('#' +  id + '-view-selector').val();
 
     let params = {
-        link          : settings.flatBOM[id].link,
-        depth         : settings.flatBOM[id].depth,
-        revisionBias  : settings.flatBOM[id].revisionBias,
-        viewId        : settings.flatBOM[id].viewId,
-        timestamp     : settings.flatBOM[id].timestamp
+        link          : settings[id].link,
+        depth         : settings[id].depth,
+        revisionBias  : settings[id].revisionBias,
+        viewId        : settings[id].viewId,
+        timestamp     : settings[id].timestamp
     }
 
-    for(let view of settings.flatBOM[id].bomViews) {
+    for(let view of settings[id].bomViews) {
         if(params.viewId == view.id) {
-            settings.flatBOM[id].columns             = view.columns;
-            settings.flatBOM[id].fieldURNPartNumber  = view.urns.partNumber;
-            settings.flatBOM[id].fieldURNQuantity    = view.urns.quantity;
-            settings.flatBOM[id].fieldURNEndItem     = view.urns.endItem;
-            settings.flatBOM[id].fieldURNSelectItems = view.urns.selectItems;
+            settings[id].columns             = view.columns;
+            settings[id].fieldURNPartNumber  = view.urns.partNumber;
+            settings[id].fieldURNQuantity    = view.urns.quantity;
+            settings[id].fieldURNEndItem     = view.urns.endItem;
+            settings[id].fieldURNSelectItems = view.urns.selectItems;
             break;
         }
     }
 
-    sortArray(settings.flatBOM[id].columns, 'displayOrder', 'integer');
+    sortArray(settings[id].columns, 'displayOrder', 'integer');
 
     let requests = [
         $.get('/plm/bom-flat', params),
         $.get('/plm/workspaces', { useCache : true})
     ];
 
-    for(let field of settings.flatBOM[id].columns) {
-        // if(field.fieldId === config.items.fieldIdNumber) fieldURNPartNumber = field.__self__.urn;
-        if(settings.flatBOM[id].editable) {
+    for(let field of settings[id].columns) {
+        // if(field.fieldId === common.workspaces.items.fieldIdNumber) fieldURNPartNumber = field.__self__.urn;
+        if(settings[id].editable) {
             if(field.visibility !== 'NEVER') {
                 if(field.editability !== 'NEVER') {
                     if(field.type.title === 'Single Selection') {
@@ -6317,22 +6528,22 @@ function insertFlatBOMData(id) {
 
     Promise.all(requests).then(function(responses) {
 
-        if(stopPanelContentUpdate(responses[0], settings.flatBOM[id])) return;
+        if(stopPanelContentUpdate(responses[0], settings[id])) return;
 
         let columns = [];
         let items   = [];
         let bom     = responses[0].data;
 
-        for(let view of settings.flatBOM[id].bomViews) {
-            if(settings.flatBOM[id].viewId == view.id) {
+        for(let view of settings[id].bomViews) {
+            if(settings[id].viewId == view.id) {
                 columns = view.columns;
                 break;
             }
         }
     
         for(let column of columns) {
-            if(includePanelTableColumn(column.fieldId, column.displayName, settings.flatBOM[id], settings.flatBOM[id].columns.length)) {
-                settings.flatBOM[id].columns.push(column);
+            if(includePanelTableColumn(column.fieldId, column.displayName, settings[id], settings[id].columns.length)) {
+                settings[id].columns.push(column);
             }
         }
 
@@ -6345,17 +6556,17 @@ function insertFlatBOMData(id) {
                 if(ws.link === workspaceLink) { workspace = ws.title; break; }
             }
 
-            if((settings.flatBOM[id].workspacesIn.length === 0) || ( settings.flatBOM[id].workspacesIn.includes(workspace))) {
-                if((settings.flatBOM[id].workspacesEx.length === 0) || (!settings.flatBOM[id].workspacesEx.includes(workspace))) {
+            if((settings[id].workspacesIn.length === 0) || ( settings[id].workspacesIn.includes(workspace))) {
+                if((settings[id].workspacesEx.length === 0) || (!settings[id].workspacesEx.includes(workspace))) {
 
-                    let contentItem = genPanelContentItem(settings.flatBOM[id], {
+                    let contentItem = genPanelContentItem(settings[id], {
                         link       : item.item.link,
                         title      : item.item.title,
                         quantity   : item.totalQuantity,
-                        partNumber : getFlatBOMNodeValue(item, settings.flatBOM[id].fieldURNPartNumber)
+                        partNumber : getFlatBOMNodeValue(item, settings[id].fieldURNPartNumber)
                     });
 
-                    for(let column of settings.flatBOM[id].columns) {
+                    for(let column of settings[id].columns) {
 
                         let value = '';
 
@@ -6374,7 +6585,7 @@ function insertFlatBOMData(id) {
                     }
 
                     // for(let field of item.data) {
-                    //     if(field.fieldId === config.items.fieldIdNumber) {
+                    //     if(field.fieldId === common.workspaces.items.fieldIdNumber) {
                     //         contentItem.partNumber = field.value;
                     //         break;
                     //     }
@@ -6388,7 +6599,7 @@ function insertFlatBOMData(id) {
 
         }
 
-        finishPanelContentUpdate(id, settings.flatBOM[id], items);
+        finishPanelContentUpdate(id, settings[id], items);
         insertFlatBOMDataDone(id, responses);
 
     });
@@ -6533,7 +6744,7 @@ function insertRootParents(link, params) {
 
     let id = isBlank(params.id) ? 'roots' : params.id;
     
-    settings.roots[id] = getPanelSettings(link, params, {
+    settings[id] = getPanelSettings(link, params, {
         headerLabel : 'Root Parents',
         layout      : 'table',
         tileIcon    : 'icon-link'
@@ -6543,33 +6754,32 @@ function insertRootParents(link, params) {
         [ 'filterByWorkspace' , true ]
     ]);
 
-    settings.roots[id].load = function() { insertRootParentsData(id); }
+    settings[id].load = function() { insertRootParentsData(id); }
 
-    genPanelTop(id, settings.roots[id], 'roots');
-    genPanelHeader(id, settings.roots[id]);
-    genPanelOpenSelectedInPLMButton(id, settings.roots[id]);
-    genPanelSelectionControls(id, settings.roots[id]);
-    genPanelFilterSelect(id, settings.roots[id], 'filterByLifecycle', 'lifecycle', 'All Lifecycles');
-    genPanelFilterSelect(id, settings.roots[id], 'filterByWorkspace', 'workspace', 'All Workspaces');
-    genPanelSearchInput(id, settings.roots[id]);
-    genPanelResizeButton(id, settings.roots[id]);
-    genPanelReloadButton(id, settings.roots[id]);
-
-    genPanelContents(id, settings.roots[id]);
+    genPanelTop                    (id, settings[id], 'roots');
+    genPanelHeader                 (id, settings[id]);
+    genPanelOpenSelectedInPLMButton(id, settings[id]);
+    genPanelSelectionControls      (id, settings[id]);
+    genPanelFilterSelect           (id, settings[id], 'filterByLifecycle', 'lifecycle', 'All Lifecycles');
+    genPanelFilterSelect           (id, settings[id], 'filterByWorkspace', 'workspace', 'All Workspaces');
+    genPanelSearchInput            (id, settings[id]);
+    genPanelResizeButton           (id, settings[id]);
+    genPanelReloadButton           (id, settings[id]);
+    genPanelContents               (id, settings[id]);
 
     insertRootParentsDone(id);
     
-    settings.roots[id].load();
+    settings[id].load();
 
 }
 function insertRootParentsData(id) {
 
-    settings.roots[id].timestamp = startPanelContentUpdate(id);
+    settings[id].timestamp = startPanelContentUpdate(id);
 
     let params = {
-        link        : settings.roots[id].link,
-        depth       : settings.roots[id].depth,
-        timestamp   : settings.roots[id].timestamp
+        link        : settings[id].link,
+        depth       : settings[id].depth,
+        timestamp   : settings[id].timestamp
     }
 
     let requests = [
@@ -6579,7 +6789,7 @@ function insertRootParentsData(id) {
 
     Promise.all(requests).then(function(responses) {
 
-        if(stopPanelContentUpdate(responses[0], settings.roots[id])) return;
+        if(stopPanelContentUpdate(responses[0], settings[id])) return;
 
         let items           = [];
         let listWorkspaces  = [];
@@ -6593,8 +6803,8 @@ function insertRootParentsData(id) {
 
 
         for(let column of columns) {
-            if(includePanelTableColumn(column.fieldId, column.displayName, settings.roots[id], settings.roots[id].columns.length)) {
-                settings.roots[id].columns.push(column);
+            if(includePanelTableColumn(column.fieldId, column.displayName, settings[id], settings[id].columns.length)) {
+                settings[id].columns.push(column);
             }
         }
 
@@ -6616,8 +6826,8 @@ function insertRootParentsData(id) {
                             }
                         }
 
-                        if((settings.roots[id].workspacesIn.length === 0) || ( settings.roots[id].workspacesIn.includes(workspace))) {
-                            if((settings.roots[id].workspacesEx.length === 0) || (!settings.roots[id].workspacesEx.includes(workspace))) {
+                        if((settings[id].workspacesIn.length === 0) || ( settings[id].workspacesIn.includes(workspace))) {
+                            if((settings[id].workspacesEx.length === 0) || (!settings[id].workspacesEx.includes(workspace))) {
 
                                 let lifecycle   = '';
                                 let quantity    = '';
@@ -6634,7 +6844,7 @@ function insertRootParentsData(id) {
                                 
                                 getRootChildren(path, responses[0].data.edges, responses[0].data.nodes, node.item.urn, 1);
 
-                                let contentItem = genPanelContentItem(settings.roots[id], {
+                                let contentItem = genPanelContentItem(settings[id], {
                                     link        : node.item.link,
                                     title       : node.item.title,
                                     subtitle    : workspace,
@@ -6664,8 +6874,8 @@ function insertRootParentsData(id) {
             }
         }
 
-        if(settings.roots[id].layout.toLowerCase() === 'table') {
-            genTable(id ,items, settings.roots[id]);
+        if(settings[id].layout.toLowerCase() === 'table') {
+            genTable(id, settings[id], items);
             $('#' + id + '-tbody').children().each(function() {
                 
                 let elemCell = $(this).children().last();
@@ -6702,13 +6912,13 @@ function insertRootParentsData(id) {
 
             });
         } else {
-            genTilesList(id, items, settings.roots[id]);   
-            // addTilesListImages(id, settings.roots[id]);
+            genTiles(id, settings[id], items);   
+            // addTilesListImages(id, settings[id]);
         }
 
         setPanelFilterOptions(id, 'lifecycle', listLifecycles);
         setPanelFilterOptions(id, 'workspace', listWorkspaces);
-        finishPanelContentUpdate(id, settings.roots[id]);
+        finishPanelContentUpdate(id, settings[id]);
         insertRootParentsDataDone(id, responses[0].data);
            
     });
@@ -6749,7 +6959,7 @@ function insertParents(link, params) {
 
     let id = isBlank(params.id) ? 'parents' : params.id;
     
-    settings.parents[id] = getPanelSettings(link, params, {
+    settings[id] = getPanelSettings(link, params, {
         headerLabel : 'Parents',
         layout      : 'list',
         tileIcon    : 'icon-product'
@@ -6760,34 +6970,33 @@ function insertParents(link, params) {
         [ 'afterParentBOMCompletion', function(id) {} ]
     ]);
 
-    settings.parents[id].expand = settings.parents[id].displayParentsBOM;
-    settings.parents[id].load = function() { insertParentsData(id); }
+    settings[id].expand = settings[id].displayParentsBOM;
+    settings[id].load = function() { insertParentsData(id); }
 
-    genPanelTop(id, settings.parents[id], 'parents');
-    genPanelHeader(id, settings.parents[id]);
-    genPanelOpenSelectedInPLMButton(id, settings.parents[id]);
-    genPanelSelectionControls(id, settings.parents[id]);
-    genPanelFilterSelect(id, settings.parents[id], 'filterByLifecycle', 'lifecycle', 'All Lifecycles');
-    genPanelFilterSelect(id, settings.parents[id], 'filterByWorkspace', 'workspace', 'All Workspaces');
-    genPanelSearchInput(id, settings.parents[id]);
-    genPanelResizeButton(id, settings.parents[id]);
-    genPanelReloadButton(id, settings.parents[id]);
-
-    genPanelContents(id, settings.parents[id]);
+    genPanelTop                    (id, settings[id], 'parents');
+    genPanelHeader                 (id, settings[id]);
+    genPanelOpenSelectedInPLMButton(id, settings[id]);
+    genPanelSelectionControls      (id, settings[id]);
+    genPanelFilterSelect           (id, settings[id], 'filterByLifecycle', 'lifecycle', 'All Lifecycles');
+    genPanelFilterSelect           (id, settings[id], 'filterByWorkspace', 'workspace', 'All Workspaces');
+    genPanelSearchInput            (id, settings[id]);
+    genPanelResizeButton           (id, settings[id]);
+    genPanelReloadButton           (id, settings[id]);
+    genPanelContents               (id, settings[id]);
 
     insertParentsDone(id);
     
-    settings.parents[id].load();
+    settings[id].load();
 
 }
 function insertParentsData(id) {
 
-    settings.parents[id].timestamp = startPanelContentUpdate(id);
+    settings[id].timestamp = startPanelContentUpdate(id);
 
     let params = {
-        link        : settings.parents[id].link,
+        link        : settings[id].link,
         limit       : 1,
-        timestamp   : settings.parents[id].timestamp
+        timestamp   : settings[id].timestamp
     }
 
     let requests = [
@@ -6797,7 +7006,7 @@ function insertParentsData(id) {
 
     Promise.all(requests).then(function(responses) {
 
-        if(stopPanelContentUpdate(responses[0], settings.parents[id])) return;
+        if(stopPanelContentUpdate(responses[0], settings[id])) return;
 
         let items           = [];
         let listWorkspaces  = [];
@@ -6809,8 +7018,8 @@ function insertParentsData(id) {
         ]
 
         for(let column of columns) {
-            if(includePanelTableColumn(column.fieldId, column.displayName, settings.parents[id], settings.parents[id].columns.length)) {
-                settings.parents[id].columns.push(column);
+            if(includePanelTableColumn(column.fieldId, column.displayName, settings[id], settings[id].columns.length)) {
+                settings[id].columns.push(column);
             }
         }
 
@@ -6831,8 +7040,8 @@ function insertParentsData(id) {
                         }
                     }
 
-                    if((settings.parents[id].workspacesIn.length === 0) || ( settings.parents[id].workspacesIn.includes(workspace))) {
-                        if((settings.parents[id].workspacesEx.length === 0) || (!settings.parents[id].workspacesEx.includes(workspace))) {
+                    if((settings[id].workspacesIn.length === 0) || ( settings[id].workspacesIn.includes(workspace))) {
+                        if((settings[id].workspacesEx.length === 0) || (!settings[id].workspacesEx.includes(workspace))) {
 
                             for(let field of node.fields) {
                                 if(field.title === 'LIFECYCLE') lifecycle = field.value;
@@ -6841,7 +7050,7 @@ function insertParentsData(id) {
                             if(!listWorkspaces.includes(workspace)) listWorkspaces.push(workspace);
                             if(!listLifecycles.includes(lifecycle)) listLifecycles.push(lifecycle);
 
-                            let contentItem = genPanelContentItem(settings.parents[id], {
+                            let contentItem = genPanelContentItem(settings[id], {
                                 link        : node.item.link,
                                 title       : node.item.title,
                                 subtitle    : lifecycle,
@@ -6867,11 +7076,11 @@ function insertParentsData(id) {
                 
         }
 
-        if(settings.parents[id].layout.toLowerCase() === 'table') {
-            genTable(id, items, settings.parents[id]);
+        if(settings[id].layout.toLowerCase() === 'table') {
+            genTable(id, settings[id], items);
         } else {
-            genTilesList(id, items, settings.parents[id]);   
-            addTilesListChevrons(id, settings.parents[id], function(elemClicked) { insertParentBOM(id, elemClicked); });
+            genTiles(id, settings[id], items);   
+            addTilesListChevrons(id, settings[id], function(elemClicked) { insertParentBOM(id, elemClicked); });
         }
 
         sortArray(listLifecycles, 0);
@@ -6879,7 +7088,7 @@ function insertParentsData(id) {
 
         setPanelFilterOptions(id, 'lifecycle', listLifecycles);
         setPanelFilterOptions(id, 'workspace', listWorkspaces);
-        finishPanelContentUpdate(id, settings.parents[id]);
+        finishPanelContentUpdate(id, settings[id]);
         insertParentsDataDone(id, responses[0].data);
         
     });
@@ -6903,7 +7112,7 @@ function insertParentBOM(id, elemClicked) {
             hideHeader       : true,
             title            : '',
             collapseContents : true,
-            afterCompletion  : function() { settings.parents[id].afterParentBOMCompletion(idBOM); }
+            afterCompletion  : function() { settings[id].afterParentBOMCompletion(idBOM); }
         });
 
     } else {
@@ -6926,7 +7135,7 @@ function insertBOMChanges(link, params) {
 
     let id = isBlank(params.id) ? 'changes' : params.id;
     
-    settings.changes[id] = getPanelSettings(link, params, {
+    settings[id] = getPanelSettings(link, params, {
         headerLabel : 'Changed BOM Items',
         layout      : 'list',
         tileIcon    : 'icon-product'
@@ -6938,34 +7147,33 @@ function insertBOMChanges(link, params) {
         [ 'wsIdChangesProcess', '78' ]
     ]);
 
-    settings.changes[id].load = function() { insertBOMChangesData(id); }
+    settings[id].load = function() { insertBOMChangesData(id); }
 
-    genPanelTop(id, settings.changes[id], 'changes');
-    genPanelHeader(id, settings.changes[id]);
-    genPanelOpenSelectedInPLMButton(id, settings.changes[id]);
-    genPanelSelectionControls(id, settings.changes[id]);
-    genPanelFilterSelect(id, settings.changes[id], 'filterByLifecycle', 'lifecycle', 'All Lifecycles');
-    genPanelFilterSelect(id, settings.changes[id], 'filterByWorkspace', 'workspace', 'All Workspaces');
-    genPanelSearchInput(id, settings.changes[id]);
-    genPanelResizeButton(id, settings.changes[id]);
-    genPanelReloadButton(id, settings.changes[id]);
-
-    genPanelContents(id, settings.changes[id]);
+    genPanelTop                    (id, settings[id], 'changes');
+    genPanelHeader                 (id, settings[id]);
+    genPanelOpenSelectedInPLMButton(id, settings[id]);
+    genPanelSelectionControls      (id, settings[id]);
+    genPanelFilterSelect           (id, settings[id], 'filterByLifecycle', 'lifecycle', 'All Lifecycles');
+    genPanelFilterSelect           (id, settings[id], 'filterByWorkspace', 'workspace', 'All Workspaces');
+    genPanelSearchInput            (id, settings[id]);
+    genPanelResizeButton           (id, settings[id]);
+    genPanelReloadButton           (id, settings[id]);
+    genPanelContents               (id, settings[id]);
 
     insertBOMChangesDone(id);
 
-    settings.changes[id].load();
+    settings[id].load();
 
 }
 function insertBOMChangesData(id) {
 
-    settings.changes[id].timestamp = startPanelContentUpdate(id);
+    settings[id].timestamp = startPanelContentUpdate(id);
 
     let params = {
-        link        : settings.changes[id].link,
-        limit       : settings.changes[id].limit,
-        relatedWSID : settings.changes[id].wsIdChangesProcess,
-        timestamp   : settings.changes[id].timestamp
+        link        : settings[id].link,
+        limit       : settings[id].limit,
+        relatedWSID : settings[id].wsIdChangesProcess,
+        timestamp   : settings[id].timestamp
     }
 
     let requests = [
@@ -6975,7 +7183,7 @@ function insertBOMChangesData(id) {
 
     Promise.all(requests).then(function(responses) {
 
-        if(stopPanelContentUpdate(responses[0], settings.changes[id])) return;
+        if(stopPanelContentUpdate(responses[0], settings[id])) return;
 
         let items           = [];
         let listWorkspaces  = [];
@@ -6986,8 +7194,8 @@ function insertBOMChangesData(id) {
         ]
 
         for(let column of columns) {
-            if(includePanelTableColumn(column.fieldId, column.displayName, settings.changes[id], settings.changes[id].columns.length)) {
-                settings.changes[id].columns.push(column);
+            if(includePanelTableColumn(column.fieldId, column.displayName, settings[id], settings[id].columns.length)) {
+                settings[id].columns.push(column);
             }
         }
 
@@ -7005,13 +7213,13 @@ function insertBOMChangesData(id) {
 
             
 
-            if((settings.changes[id].workspacesIn.length === 0) || ( settings.changes[id].workspacesIn.includes(workspace))) {
-                if((settings.changes[id].workspacesEx.length === 0) || (!settings.changes[id].workspacesEx.includes(workspace))) {
+            if((settings[id].workspacesIn.length === 0) || ( settings[id].workspacesIn.includes(workspace))) {
+                if((settings[id].workspacesEx.length === 0) || (!settings[id].workspacesEx.includes(workspace))) {
 
                     if(!listWorkspaces.includes(workspace)) listWorkspaces.push(workspace);
                     if(!listLifecycles.includes(changedItem.lifecycle)) listLifecycles.push(changedItem.lifecycle);
 
-                    let contentItem = genPanelContentItem(settings.changes[id], {
+                    let contentItem = genPanelContentItem(settings[id], {
                         link        : changedItem.link,
                         title       : changedItem.title,
                         subtitle    : changedItem.lifecycle,
@@ -7039,7 +7247,7 @@ function insertBOMChangesData(id) {
 
         setPanelFilterOptions(id, 'lifecycle', listLifecycles);
         setPanelFilterOptions(id, 'workspace', listWorkspaces);
-        finishPanelContentUpdate(id, settings.changes[id], items);
+        finishPanelContentUpdate(id, settings[id], items);
         insertBOMChangesDataDone(id, responses[0].data);
         
     });
@@ -7066,84 +7274,70 @@ function insertViewer(link, params) {
     if(!isBlank(params.fileId)  )   fileId = params.fileId;
     if(!isBlank(params.filename)) filename = params.filename;
 
-    settings.viewer[id]               = {};
-    settings.viewer[id].link          = link;
-    settings.viewer[id].timeStamp     = new Date().getTime();
-    settings.viewer[id].extensionsIn  = ['dwf','dwfx','iam','ipt','stp','step','sldprt','pdf'];
-    settings.viewer[id].extensionsEx  = [];
-    settings.viewer[id].restartViewer = params.restartViewer || false;
+    settings[id]                   = {};
+    settings[id].link              = link;
+    settings[id].timeStamp         = new Date().getTime();
+    settings[id].suffixPrimaryFile = common.viewer.suffixPrimaryFile  || ['.iam.dwf', '.iam.dwfx', '.ipt.dwf', '.ipt.dwfx'];
+    settings[id].extensionsIn      = common.viewer.extensionsIncluded || ['dwf', 'dwfx', 'nwd', 'iam', 'ipt', 'stp', 'step', 'sldprt', 'pdf'];
+    settings[id].extensionsEx      = common.viewer.extensionsExcluded || [];
+    settings[id].restartViewer     = params.restartViewer || false;
 
-    if(!isBlank(params.extensionsIn)    ) settings.viewer[id].extensionsIn     = params.extensionsIn;
-    if(!isBlank(params.extensionsEx)    ) settings.viewer[id].extensionsEx     = params.extensionsEx;
-    if(!isBlank(params.backgroundColor) ) settings.viewer[id].backgroundColor  = params.backgroundColor;
-    if(!isBlank(params.antiAliasing)    ) settings.viewer[id].antiAliasing     = params.antiAliasing;
-    if(!isBlank(params.ambientShadows)  ) settings.viewer[id].ambientShadows   = params.ambientShadows;
-    if(!isBlank(params.groundReflection)) settings.viewer[id].groundReflection = params.groundReflection;
-    if(!isBlank(params.groundShadow)    ) settings.viewer[id].groundShadow     = params.groundShadow;
-    if(!isBlank(params.lightPreset)     ) settings.viewer[id].lightPreset      = params.lightPreset;
+    if(!isBlank(params.suffixPrimaryFile)) settings[id].suffixPrimaryFile = params.suffixPrimaryFile;
+    if(!isBlank(params.extensionsIn)     ) settings[id].extensionsIn      = params.extensionsIn;
+    if(!isBlank(params.extensionsEx)     ) settings[id].extensionsEx      = params.extensionsEx;
+    if(!isBlank(params.backgroundColor)  ) settings[id].backgroundColor   = params.backgroundColor;
+    if(!isBlank(params.antiAliasing)     ) settings[id].antiAliasing      = params.antiAliasing;
+    if(!isBlank(params.ambientShadows)   ) settings[id].ambientShadows    = params.ambientShadows;
+    if(!isBlank(params.groundReflection) ) settings[id].groundReflection  = params.groundReflection;
+    if(!isBlank(params.groundShadow)     ) settings[id].groundShadow      = params.groundShadow;
+    if(!isBlank(params.lightPreset)      ) settings[id].lightPreset       = params.lightPreset;
+    if(!isBlank(params.cacheInstances)   ) settings[id].cacheInstances    = params.cacheInstances;
 
     let elemInstance = $('#' + id).children('.adsk-viewing-viewer');
     if(elemInstance.length > 0) elemInstance.hide();
 
     $('#' + id).attr('data-link', link);
+    $('#' + id).addClass('hidden');
+    $('#' + id + '-message').addClass('hidden');
+    $('#' + id + '-conversion-error').addClass('hidden');
 
     let elemProcessing = $('#' + id + '-processing');
 
-    if(elemProcessing.length === 0) {
-        appendViewerProcessing(id, false);
-    } else {
-        elemProcessing.show();
-        $('#' + id + '-message').hide();
-    }
+    if(elemProcessing.length === 0) appendViewerProcessing(id, false);
+
+    elemProcessing.removeClass('hidden');
+
+    $('#' + id + '-processing-message').html('Getting Viewables');
 
     $.post('/plm/get-viewables', { 
-        link          : link, 
-        fileId        : fileId, 
-        filename      : filename, 
-        extensionsIn  : settings.viewer[id].extensionsIn, 
-        extensionsEx  : settings.viewer[id].extensionsEx, 
-        timeStamp     : settings.viewer[id].timeStamp
+
+        link              : link, 
+        fileId            : fileId, 
+        filename          : filename, 
+        suffixPrimaryFile : settings[id].suffixPrimaryFile, 
+        extensionsIn      : settings[id].extensionsIn, 
+        extensionsEx      : settings[id].extensionsEx, 
+        timeStamp         : settings[id].timeStamp
+
     }, function(response) {
 
-        if(settings.viewer[id].link      !== response.params.link     ) return;
-        if(settings.viewer[id].timeStamp !=  response.params.timeStamp) return;
-
+        if(settings[id].link      !== response.params.link     ) return;
+        if(settings[id].timeStamp !=  response.params.timeStamp) return;
+        
         if(response.data.length > 0) {
             
-            sortArray(response.data, 'size', 'integer', 'descending');
+        //     // sortArray(response.data, 'size', 'integer', 'descending');
             
-            let formats3D  = config.viewer.preferredFileSuffixes || ['.ipt.dwf', '.ipt.dwfx', '.iam.dwf', '.iam.dwfx'];
-            let viewables  = [];
-            let found3DDWF = false;
-
-            for(let viewable of response.data) {
-                let add = true;
-                if(!found3DDWF){
-                    for(let format of formats3D) {
-                        if(viewable.name.toLowerCase().indexOf(format.toLowerCase()) > -1) {
-                            found3DDWF = true;
-                            viewables.unshift(viewable);
-                            add = false;
-                            break;
-                        }
-                    }
-                }  
-                if(add) viewables.push(viewable);
-            }
-
+            $('#' + id).removeClass('hidden');
             $('body').removeClass('no-viewer');
 
-            if(elemInstance.length > 0) elemInstance.show();
-
             insertViewerDone(id, response.data);
-            initViewer(id, viewables, settings.viewer[id]);
+            initViewer(id, link, response.data, settings[id]);
 
         } else {
 
-            $('#' + id).hide();
-            $('#' + id + '-processing').hide();
-            $('#' + id + '-message').css('display', 'flex');
             $('body').addClass('no-viewer');
+            viewerShowErrorMessage('No viewable found'); return;
 
         }
         
@@ -7279,7 +7473,7 @@ function insertManagedItems(link, params) {
 
     let id = isBlank(params.id) ? 'managed-items' : params.id;
     
-    settings.managedItems[id] = getPanelSettings(link, params, {
+    settings[id] = getPanelSettings(link, params, {
         headerLabel : 'Managed Items',
         layout      : 'table',
         tileIcon    : 'icon-product'
@@ -7289,44 +7483,43 @@ function insertManagedItems(link, params) {
         [ 'hideButtonDisconnect', false ]
     ]);
 
-    settings.managedItems[id].load = function() { insertManagedItemsData(id); }
+    settings[id].load = function() { insertManagedItemsData(id); }
 
-    genPanelTop(id, settings.managedItems[id], 'managed-items');
-    genPanelHeader(id, settings.managedItems[id]);
-    genPanelOpenSelectedInPLMButton(id, settings.managedItems[id]);
-    genPanelDisconnectButton(id, settings.managedItems[id], function() { removeManagedItems(id); } );
-    genPanelSelectionControls(id, settings.managedItems[id]);
-    genPanelFilterSelect(id, settings.managedItems[id], 'filterByLifecycle', 'lifecycle', 'All Lifecycle Transitions');
-    genPanelFilterSelect(id, settings.managedItems[id], 'filterByWorkspace', 'workspace', 'All Workspaces');
-    genPanelSearchInput(id, settings.managedItems[id]);
-    genPanelResizeButton(id, settings.managedItems[id]);
-    genPanelReloadButton(id, settings.managedItems[id]);
-
-    genPanelContents(id, settings.managedItems[id]);
+    genPanelTop                    (id, settings[id], 'managed-items');
+    genPanelHeader                 (id, settings[id]);
+    genPanelOpenSelectedInPLMButton(id, settings[id]);
+    genPanelDisconnectButton       (id, settings[id], function() { removeManagedItems(id); } );
+    genPanelSelectionControls      (id, settings[id]);
+    genPanelFilterSelect           (id, settings[id], 'filterByLifecycle', 'lifecycle', 'All Lifecycle Transitions');
+    genPanelFilterSelect           (id, settings[id], 'filterByWorkspace', 'workspace', 'All Workspaces');
+    genPanelSearchInput            (id, settings[id]);
+    genPanelResizeButton           (id, settings[id]);
+    genPanelReloadButton           (id, settings[id]);
+    genPanelContents               (id, settings[id]);
 
     insertManagedItemsDone(id);
     
-    settings.managedItems[id].load();
+    settings[id].load();
 
 }
 function insertManagedItemsData(id, linkNew) {
 
-    settings.managedItems[id].timestamp = startPanelContentUpdate(id);
+    settings[id].timestamp = startPanelContentUpdate(id);
 
     let params = {
-        link      : settings.managedItems[id].link,
-        timestamp : settings.managedItems[id].timestamp
+        link      : settings[id].link,
+        timestamp : settings[id].timestamp
     }
 
     let requests = [
         $.get('/plm/manages', params),
-        $.get('/plm/managed-fields', { link : settings.managedItems[id].link, useCache : true }),
+        $.get('/plm/managed-fields', { link : settings[id].link, useCache : true }),
         $.get('/plm/workspaces', { useCache : true })
     ]
 
     Promise.all(requests).then(function(responses) {
 
-        if(stopPanelContentUpdate(responses[0], settings.managedItems[id])) return;
+        if(stopPanelContentUpdate(responses[0], settings[id])) return;
 
         let items           = [];
         let listWorkspaces  = [];
@@ -7344,8 +7537,8 @@ function insertManagedItemsData(id, linkNew) {
         }
 
         for(let column of columns) {
-            if(includePanelTableColumn(column.fieldId, column.displayName, settings.managedItems[id], settings.managedItems[id].columns.length)) {
-                settings.managedItems[id].columns.push(column);
+            if(includePanelTableColumn(column.fieldId, column.displayName, settings[id], settings[id].columns.length)) {
+                settings[id].columns.push(column);
             }
         }                
 
@@ -7360,8 +7553,8 @@ function insertManagedItemsData(id, linkNew) {
                 if(ws.link === workspaceLink) { workspace = ws.title; break; }
             }
 
-            if((settings.managedItems[id].workspacesIn.length === 0) || ( settings.managedItems[id].workspacesIn.includes(workspace))) {
-                if((settings.managedItems[id].workspacesEx.length === 0) || (!settings.managedItems[id].workspacesEx.includes(workspace))) {
+            if((settings[id].workspacesIn.length === 0) || ( settings[id].workspacesIn.includes(workspace))) {
+                if((settings[id].workspacesEx.length === 0) || (!settings[id].workspacesEx.includes(workspace))) {
             
                     if(!isBlank(item.effectivityDate)) {
                         let split   = item.effectivityDate.split('-');
@@ -7372,7 +7565,7 @@ function insertManagedItemsData(id, linkNew) {
                     if(!listLifecycles.includes(lifecycle)) listLifecycles.push(lifecycle);
                     if(!listWorkspaces.includes(workspace)) listWorkspaces.push(workspace);
 
-                    let contentItem = genPanelContentItem(settings.managedItems[id], {
+                    let contentItem = genPanelContentItem(settings[id], {
                         link  : item.item.link, 
                         title : item.item.title,
                         subtitle    : 'Lifeycle Transition : ' + lifecycle
@@ -7412,9 +7605,9 @@ function insertManagedItemsData(id, linkNew) {
                     //     quantity    : ''
                     // };
 
-                    for(let index = 5; index < settings.managedItems[id].columns.length; index++) {
+                    for(let index = 5; index < settings[id].columns.length; index++) {
                         for(let field of item.linkedFields) {
-                            if(field.__self__ === settings.managedItems[id].columns[index].fieldId) {
+                            if(field.__self__ === settings[id].columns[index].fieldId) {
                                 contentItem.data.push({
                                     fieldId : field.__self__,
                                     value : field.value
@@ -7439,7 +7632,7 @@ function insertManagedItemsData(id, linkNew) {
 
         setPanelFilterOptions(id, 'lifecycle', listLifecycles);
         setPanelFilterOptions(id, 'workspace', listWorkspaces);
-        finishPanelContentUpdate(id, settings.managedItems[id], items);
+        finishPanelContentUpdate(id, settings[id], items);
         insertManagedItemsDataDone(id, responses[0].data, responses[1].data);
 
     });
@@ -7454,7 +7647,7 @@ function removeManagedItems(id) {
 
     $('#' + id + '-content').find('.content-item.selected').each(function() {
         requests.push($.get('/plm/remove-managed-item', { 
-            link   : settings.managedItems[id].link, 
+            link   : settings[id].link, 
             itemId : $(this).attr('data-link').split('/')[6]
         }));
     });
@@ -7476,7 +7669,7 @@ function insertChangeProcesses(link, params) {
 
     let id = isBlank(params.id) ? 'processes' : params.id;
     
-    settings.processes[id] = getPanelSettings(link, params, {
+    settings[id] = getPanelSettings(link, params, {
         headerLabel : 'Processes',
         layout      : 'list',
         tileIcon    : 'icon-status'
@@ -7498,36 +7691,35 @@ function insertChangeProcesses(link, params) {
         [ 'createConnectAffectedItem', true ]
     ]);
 
-    settings.processes[id].load = function() { insertChangeProcessesData(id); }
+    settings[id].load = function() { insertChangeProcessesData(id); }
 
-    genPanelTop(id, settings.processes[id], 'processes');
-    genPanelHeader(id, settings.processes[id]);
-    genPanelOpenSelectedInPLMButton(id, settings.processes[id]);
-    genPanelSelectionControls(id, settings.processes[id]);
-    genPanelFilterSelect(id, settings.processes[id], 'filterByStatus'   , 'status'   , 'All States'    );
-    genPanelFilterSelect(id, settings.processes[id], 'filterByWorkspace', 'workspace', 'All Workspaces');
-    genPanelSearchInput(id, settings.processes[id]);
-    genPanelResizeButton(id, settings.processes[id]);
-    genPanelReloadButton(id, settings.processes[id]);
+    genPanelTop                    (id, settings[id], 'processes');
+    genPanelHeader                 (id, settings[id]);
+    genPanelOpenSelectedInPLMButton(id, settings[id]);
+    genPanelSelectionControls      (id, settings[id]);
+    genPanelFilterSelect           (id, settings[id], 'filterByStatus'   , 'status'   , 'All States'    );
+    genPanelFilterSelect           (id, settings[id], 'filterByWorkspace', 'workspace', 'All Workspaces');
+    genPanelSearchInput            (id, settings[id]);
+    genPanelResizeButton           (id, settings[id]);
+    genPanelReloadButton           (id, settings[id]);
+    genPanelContents               (id, settings[id]);
 
-    genPanelContents(id, settings.processes[id]);
-
-    if(settings.processes[id].editable) {
+    if(settings[id].editable) {
 
         genPanelActionButton(id, {}, 'create', 'Create New', 'Create new process', function() {
-            insertCreate(settings.processes[id].createWorkspaceNames, settings.processes[id].createWorkspaceIds, {
-                id                  : settings.processes[id].createId,
-                headerLabel         : settings.processes[id].createHeaderLabel,
-                sectionsIn          : settings.processes[id].createSectionsIn,
-                sectionsEx          : settings.processes[id].createSectionsEx,
-                fieldsIn            : settings.processes[id].createFieldsIn,
-                fieldsEx            : settings.processes[id].createFieldsEx,
+            insertCreate(settings[id].createWorkspaceNames, settings[id].createWorkspaceIds, {
+                id                  : settings[id].createId,
+                headerLabel         : settings[id].createHeaderLabel,
+                sectionsIn          : settings[id].createSectionsIn,
+                sectionsEx          : settings[id].createSectionsEx,
+                fieldsIn            : settings[id].createFieldsIn,
+                fieldsEx            : settings[id].createFieldsEx,
                 contextId           : id,
-                contextItem         : settings.processes[id].link,
-                contextItems        : settings.processes[id].createContextItems,
-                contextItemFields   : settings.processes[id].createContextItemFields,
-                viewerImageFields   : settings.processes[id].createViewerImageFields,
-                performTransition   : settings.processes[id].createPerformTransition,
+                contextItem         : settings[id].link,
+                contextItems        : settings[id].createContextItems,
+                contextItemFields   : settings[id].createContextItemFields,
+                viewerImageFields   : settings[id].createViewerImageFields,
+                performTransition   : settings[id].createPerformTransition,
                 afterCreation       : function(createId, createLink, data, id) { afterChangeProcessCreation(createId, createLink, id); }
             });
         }).addClass('panel-action-create').addClass('default');
@@ -7536,16 +7728,16 @@ function insertChangeProcesses(link, params) {
 
     insertChangeProcessesDone(id);
     
-    settings.processes[id].load();
+    settings[id].load();
 
 }
 function insertChangeProcessesData(id, linkNew) {
 
-    settings.processes[id].timestamp = startPanelContentUpdate(id);
+    settings[id].timestamp = startPanelContentUpdate(id);
 
     let params = {
-        link      : settings.processes[id].link,
-        timestamp : settings.processes[id].timestamp
+        link      : settings[id].link,
+        timestamp : settings[id].timestamp
     }
 
     let requests = [
@@ -7553,16 +7745,16 @@ function insertChangeProcessesData(id, linkNew) {
         $.get('/plm/workspaces?limit=250', { useCache : true })
     ]
 
-    if(settings.processes[id].editable) {
+    if(settings[id].editable) {
         requests.push($.get('/plm/permissions', params));
-        requests.push($.get('/plm/linked-workspaces', { link : settings.processes[id].link, useCache : true }));
+        requests.push($.get('/plm/linked-workspaces', { link : settings[id].link, useCache : true }));
     }
 
     Promise.all(requests).then(function(responses) {
 
-        if(stopPanelContentUpdate(responses[0], settings.processes[id])) return;
+        if(stopPanelContentUpdate(responses[0], settings[id])) return;
 
-        settings.processes[id].columns = [];
+        settings[id].columns = [];
 
         let items           = [];
         let listWorkspaces  = [];
@@ -7579,8 +7771,8 @@ function insertChangeProcessesData(id, linkNew) {
         ]
 
         for(let column of columns) {
-            if(includePanelTableColumn(column.fieldId, column.displayName, settings.processes[id], settings.processes[id].columns.length)) {
-                settings.processes[id].columns.push(column);
+            if(includePanelTableColumn(column.fieldId, column.displayName, settings[id], settings[id].columns.length)) {
+                settings[id].columns.push(column);
             }
         }
 
@@ -7607,8 +7799,8 @@ function insertChangeProcessesData(id, linkNew) {
             let workspace   = process.workspace;
             let workspaceId = process.__self__.split('/')[4];
 
-            if((settings.processes[id].workspacesIn.length === 0) || ( settings.processes[id].workspacesIn.includes(workspace)) || ( settings.processes[id].workspacesIn.includes(workspaceId))) {
-                if((settings.processes[id].workspacesEx.length === 0) || ((!settings.processes[id].workspacesEx.includes(workspace)) && !settings.processes[id].workspacesEx.includes(workspaceId))) {
+            if((settings[id].workspacesIn.length === 0) || ( settings[id].workspacesIn.includes(workspace)) || ( settings[id].workspacesIn.includes(workspaceId))) {
+                if((settings[id].workspacesEx.length === 0) || ((!settings[id].workspacesEx.includes(workspace)) && !settings[id].workspacesEx.includes(workspaceId))) {
 
                     if(!listStates.includes(state)) listStates.push(state);
                     if(!listWorkspaces.includes(workspace)) listWorkspaces.push(workspace);
@@ -7618,7 +7810,7 @@ function insertChangeProcessesData(id, linkNew) {
                     let dateCreated  = process['first-workflow-history'].created.split('T')[0].split('-');
                     let creationDate = new Date(dateCreated[0], dateCreated[1], dateCreated[2]);
 
-                    let contentItem = genPanelContentItem(settings.processes[id], {
+                    let contentItem = genPanelContentItem(settings[id], {
                         link        : process.item.link, 
                         title       : process.item.title,
                         subtitle    : 'Workspace : ' + workspace + ', current status: '+ process.item.currentState,
@@ -7653,8 +7845,8 @@ function insertChangeProcessesData(id, linkNew) {
 
         setPanelFilterOptions(id, 'status', listStates);
         setPanelFilterOptions(id, 'workspace', listWorkspaces);
-        setPanelContentActions(id, settings.processes[id], responses);
-        finishPanelContentUpdate(id, settings.processes[id], items, linkNew);
+        setPanelContentActions(id, settings[id], responses);
+        finishPanelContentUpdate(id, settings[id], items, linkNew);
         insertChangeProcessesDataDone(id, responses[0].data);
 
     });
@@ -7662,9 +7854,9 @@ function insertChangeProcessesData(id, linkNew) {
 }
 function afterChangeProcessCreation(createId, createLink, id) {
 
-    if(!settings.processes[id].createConnectAffectedItem) return;
+    if(!settings[id].createConnectAffectedItem) return;
 
-    let link = settings.processes[id].link;
+    let link = settings[id].link;
 
     $.post('/plm/add-managed-items', { link : createLink, items : [ link ] }, function() {
         insertChangeProcessesData(id, createLink);
@@ -7684,7 +7876,7 @@ function insertProject(link, params) {
 
     let id = isBlank(params.id) ? 'project' : params.id;
     
-    settings.project[id] = getPanelSettings(link, params, {
+    settings[id] = getPanelSettings(link, params, {
         headerLabel : 'Timeline',
         layout      : 'list',
         tileIcon    : 'icon-calendar'
@@ -7710,8 +7902,8 @@ function insertProject(link, params) {
         [ 'createToggles'          , false ]    
     ]);
 
-    if(settings.project[id].stateColors.length === 0) {
-        settings.project[id].stateColors = [
+    if(settings[id].stateColors.length === 0) {
+        settings[id].stateColors = [
             { state : 'Due'    , color : '#dd2222' },
             { state : 'In Work', color : '#faa21b' },
             { state : 'Done'   , color : '#6a9728' },
@@ -7719,40 +7911,39 @@ function insertProject(link, params) {
         ]
     }
 
-    settings.project[id].load = function() { insertProjectData(id); }
+    settings[id].load = function() { insertProjectData(id); }
 
-    genPanelTop(id, settings.project[id], 'project');
-    genPanelHeader(id, settings.project[id]);
-    genPanelOpenSelectedInPLMButton(id, settings.project[id]);
-    genPanelSelectionControls(id, settings.project[id]);
-    genPanelFilterSelect(id, settings.project[id], 'filterByStatus'   , 'status'   , 'All States'    );
-    genPanelFilterSelect(id, settings.project[id], 'filterByWorkspace', 'workspace', 'All Workspaces');
-    genPanelSearchInput(id, settings.project[id]);
-    genPanelResizeButton(id, settings.project[id]);
-    genPanelReloadButton(id, settings.project[id]);
+    genPanelTop                    (id, settings[id], 'project');
+    genPanelHeader                 (id, settings[id]);
+    genPanelOpenSelectedInPLMButton(id, settings[id]);
+    genPanelSelectionControls      (id, settings[id]);
+    genPanelFilterSelect           (id, settings[id], 'filterByStatus'   , 'status'   , 'All States'    );
+    genPanelFilterSelect           (id, settings[id], 'filterByWorkspace', 'workspace', 'All Workspaces');
+    genPanelSearchInput            (id, settings[id]);
+    genPanelResizeButton           (id, settings[id]);
+    genPanelReloadButton           (id, settings[id]);
+    genPanelContents               (id, settings[id]);
 
-    genPanelContents(id, settings.project[id]);
+    if(settings[id].editable) {
 
-    if(settings.project[id].editable) {
-
-        genPanelCreateButton(id, settings.project[id], function(createId, createLink, data, id) { afterProjectItemCreation(createId, createLink, data, id); });
-        genPanelDisconnectButton(id, settings.project[id], function() { disconnectProjectItems(id); });
+        genPanelCreateButton(id, settings[id], function(createId, createLink, data, id) { afterProjectItemCreation(createId, createLink, data, id); });
+        genPanelDisconnectButton(id, settings[id], function() { disconnectProjectItems(id); });
 
     }
 
     insertProjectDone(id);
     
-    settings.project[id].load();
+    settings[id].load();
 
 }
 function insertProjectDone(id) {}
 function insertProjectData(id, linkNew) {
 
-    settings.project[id].timestamp = startPanelContentUpdate(id);
+    settings[id].timestamp = startPanelContentUpdate(id);
 
     let params = {
-        link      : settings.project[id].link,
-        timestamp : settings.project[id].timestamp
+        link      : settings[id].link,
+        timestamp : settings[id].timestamp
     }
 
     let requests = [
@@ -7760,16 +7951,16 @@ function insertProjectData(id, linkNew) {
         $.get('/plm/workspaces?limit=250', { useCache : true })
     ]
 
-    if(settings.project[id].editable) {
+    if(settings[id].editable) {
         requests.push($.get('/plm/permissions', params));
-        requests.push($.get('/plm/related-workspaces', { wsId : settings.project[id].link.split('/')[4], view : '16', useCache : true }));
+        requests.push($.get('/plm/related-workspaces', { wsId : settings[id].link.split('/')[4], view : '16', useCache : true }));
     }
 
     Promise.all(requests).then(function(responses) {
 
-        if(stopPanelContentUpdate(responses[0], settings.project[id])) return;
+        if(stopPanelContentUpdate(responses[0], settings[id])) return;
 
-        settings.project[id].columns = [];
+        settings[id].columns = [];
 
         let items           = [];
         let listWorkspaces  = [];
@@ -7785,8 +7976,8 @@ function insertProjectData(id, linkNew) {
         ]
 
         for(let column of columns) {
-            if(includePanelTableColumn(column.fieldId, column.displayName, settings.project[id], settings.project[id].columns.length)) {
-                settings.project[id].columns.push(column);
+            if(includePanelTableColumn(column.fieldId, column.displayName, settings[id], settings[id].columns.length)) {
+                settings[id].columns.push(column);
             }
         }
 
@@ -7798,7 +7989,7 @@ function insertProjectData(id, linkNew) {
 
                 projectItem.workspace   = 'Manual Entry';
                 projectItem.workspaceId = '-';
-                projectItem.link        = settings.project[id].link;
+                projectItem.link        = settings[id].link;
 
             } else {
 
@@ -7824,12 +8015,12 @@ function insertProjectData(id, linkNew) {
             let state       = projectItem.status || '-';
             let workspace   = projectItem.workspace;
 
-            if((settings.project[id].workspacesIn.length === 0) || ( settings.project[id].workspacesIn.includes(workspace)) || ( settings.project[id].workspacesIn.includes(projectItem.workspaceId))) {
-                if((settings.project[id].workspacesEx.length === 0) || ((!settings.project[id].workspacesEx.includes(workspace)) && !settings.project[id].workspacesEx.includes(projectItem.workspaceId))) {
+            if((settings[id].workspacesIn.length === 0) || ( settings[id].workspacesIn.includes(workspace)) || ( settings[id].workspacesIn.includes(projectItem.workspaceId))) {
+                if((settings[id].workspacesEx.length === 0) || ((!settings[id].workspacesEx.includes(workspace)) && !settings[id].workspacesEx.includes(projectItem.workspaceId))) {
 
                     if(!listWorkspaces.includes(workspace)) listWorkspaces.push(workspace);
 
-                    let contentItem = genPanelContentItem(settings.project[id], {
+                    let contentItem = genPanelContentItem(settings[id], {
                         link        : projectItem.link, 
                         edge        : projectItem.__self__,
                         title       : projectItem.title,
@@ -7866,8 +8057,8 @@ function insertProjectData(id, linkNew) {
 
         setPanelFilterOptions(id, 'status', listStates);
         setPanelFilterOptions(id, 'workspace', listWorkspaces);
-        setPanelContentActions(id, settings.project[id], responses);
-        finishPanelContentUpdate(id, settings.project[id], items, linkNew);
+        setPanelContentActions(id, settings[id], responses);
+        finishPanelContentUpdate(id, settings[id], items, linkNew);
         insertProjectDataDone(id, responses[0].data);
 
     });
@@ -7890,10 +8081,10 @@ function getProjectItemFlag(projectItem) {
 }
 function afterProjectItemCreation(createId, createLink, data, id) {
 
-    $.post('/plm/add-project-item', { link : settings.project[id].link, item : createLink }, function(response) {
+    $.post('/plm/add-project-item', { link : settings[id].link, item : createLink }, function(response) {
         $('#overlay').hide();
         $('#' + createId).hide();
-        settings.project[id].load();
+        settings[id].load();
     });
 
 }
@@ -7910,7 +8101,7 @@ function disconnectProjectItems(id) {
     });
 
     Promise.all(requests).then(function(responses) {
-        settings.project[id].load();
+        settings[id].load();
     });
 
 }
@@ -7926,7 +8117,7 @@ function insertRelationships(link, params) {
 
     let id = isBlank(params.id) ? 'relationships' : params.id;
     
-    settings.relationships[id] = getPanelSettings(link, params, {
+    settings[id] = getPanelSettings(link, params, {
         headerLabel : 'Relationships',
         layout      : 'list',
         tileIcon    : 'icon-link'
@@ -7934,38 +8125,37 @@ function insertRelationships(link, params) {
         [ 'filterByWorkspace', true ]
     ]);
 
-    settings.relationships[id].load = function() { insertRelationshipsData(id); }
+    settings[id].load = function() { insertRelationshipsData(id); }
 
-    genPanelTop(id, settings.relationships[id], 'managed-items');
-    genPanelHeader(id, settings.relationships[id]);
-    genPanelOpenSelectedInPLMButton(id, settings.relationships[id]);
-    genPanelSelectionControls(id, settings.relationships[id]);
-    genPanelFilterSelect(id, settings.relationships[id], 'filterByWorkspace', 'workspace', 'All Workspaces');
-    genPanelSearchInput(id, settings.relationships[id]);
-    genPanelResizeButton(id, settings.relationships[id]);
-    genPanelReloadButton(id, settings.relationships[id]);
-
-    genPanelContents(id, settings.relationships[id]);
+    genPanelTop                    (id, settings[id], 'managed-items');
+    genPanelHeader                 (id, settings[id]);
+    genPanelOpenSelectedInPLMButton(id, settings[id]);
+    genPanelSelectionControls      (id, settings[id]);
+    genPanelFilterSelect           (id, settings[id], 'filterByWorkspace', 'workspace', 'All Workspaces');
+    genPanelSearchInput            (id, settings[id]);
+    genPanelResizeButton           (id, settings[id]);
+    genPanelReloadButton           (id, settings[id]);
+    genPanelContents               (id, settings[id]);
 
     insertRelationshipsDone(id);
 
-    settings.relationships[id].load();
+    settings[id].load();
 
 }
 function insertRelationshipsData(id) {
 
-    settings.relationships[id].timestamp = startPanelContentUpdate(id);
+    settings[id].timestamp = startPanelContentUpdate(id);
 
     let params = {
-        link        : settings.relationships[id].link,
-        timestamp   : settings.relationships[id].timestamp
+        link        : settings[id].link,
+        timestamp   : settings[id].timestamp
     }
 
     $.get('/plm/relationships', params, function(response) {
 
-        if(stopPanelContentUpdate(response, settings.relationships[id])) return;
+        if(stopPanelContentUpdate(response, settings[id])) return;
 
-        settings.relationships[id].columns = [];
+        settings[id].columns = [];
 
         let items           = [];
         let listWorkspaces  = [];
@@ -7978,8 +8168,8 @@ function insertRelationshipsData(id) {
         ]
 
         for(let column of columns) {
-            if(includePanelTableColumn(column.fieldId, column.displayName, settings.relationships[id], settings.relationships[id].columns.length)) {
-                settings.relationships[id].columns.push(column);
+            if(includePanelTableColumn(column.fieldId, column.displayName, settings[id], settings[id].columns.length)) {
+                settings[id].columns.push(column);
             }
         }
 
@@ -7995,12 +8185,12 @@ function insertRelationshipsData(id) {
 
             let workspace = relationship.workspace.title;
 
-            if((settings.relationships[id].workspacesIn.length === 0) || ( settings.relationships[id].workspacesIn.includes(workspace))) {
-                if((settings.relationships[id].workspacesEx.length === 0) || (!settings.relationships[id].workspacesEx.includes(workspace))) {
+            if((settings[id].workspacesIn.length === 0) || ( settings[id].workspacesIn.includes(workspace))) {
+                if((settings[id].workspacesEx.length === 0) || (!settings[id].workspacesEx.includes(workspace))) {
 
                     if(!listWorkspaces.includes(workspace)) listWorkspaces.push(workspace);
 
-                    let contentItem = genPanelContentItem(settings.relationships[id], {
+                    let contentItem = genPanelContentItem(settings[id], {
                         link        : relationship.item.link, 
                         title       : relationship.item.title,
                         subtitle    : workspace
@@ -8025,16 +8215,16 @@ function insertRelationshipsData(id) {
 
         }
 
-        // if(settings.relationships[id].layout.toLowerCase() === 'table') {
-        //     genTable(id ,settings.relationships[id], items);
+        // if(settings[id].layout.toLowerCase() === 'table') {
+        //     genTable(id ,settings[id], items);
         // } else {
-        //     genTilesList(id, items, settings.relationships[id]);   
+        //     genTilesList(id, items, settings[id]);   
         // }
 
         sortArray(listWorkspaces, 0);
         setPanelFilterOptions(id, 'workspace', listWorkspaces);
 
-        finishPanelContentUpdate(id, settings.relationships[id], items);
+        finishPanelContentUpdate(id, settings[id], items);
         insertRelationshipsDataDone(id, response);
 
 
@@ -8054,7 +8244,7 @@ function insertSourcing(link, params) {
 
     let id = isBlank(params.id) ? 'sourcing' : params.id;
     
-    settings.sourcing[id] = getPanelSettings(link, params, {
+    settings[id] = getPanelSettings(link, params, {
         headerLabel : 'Sourcing',
         layout      : 'table'
     }, [
@@ -8063,45 +8253,44 @@ function insertSourcing(link, params) {
         [ 'groupBy'             , ''    ]
     ]);
 
-    settings.sourcing[id].load   = function() { insertSourcingData(id); }
+    settings[id].load   = function() { insertSourcingData(id); }
 
-    genPanelTop(id, settings.sourcing[id], 'sourcing');
-    genPanelHeader(id, settings.sourcing[id]);
-    genPanelBookmarkButton(id, settings.sourcing[id]);
-    genPanelOpenInPLMButton(id, settings.sourcing[id]);
-    genPanelFilterSelect(id, settings.sourcing[id], 'filterBySupplier', 'supplier', 'All Suppliers');
-    genPanelFilterSelect(id, settings.sourcing[id], 'filterByManufacturer', 'manufacturer', 'All Manufacturers');
-    genPanelSearchInput(id, settings.sourcing[id]);
-    genPanelResizeButton(id, settings.sourcing[id]);
-    genPanelReloadButton(id, settings.sourcing[id]);
-
-    genPanelContents(id, settings.sourcing[id]);
+    genPanelTop            (id, settings[id], 'sourcing');
+    genPanelHeader         (id, settings[id]);
+    genPanelBookmarkButton (id, settings[id]);
+    genPanelOpenInPLMButton(id, settings[id]);
+    genPanelFilterSelect   (id, settings[id], 'filterBySupplier', 'supplier', 'All Suppliers');
+    genPanelFilterSelect   (id, settings[id], 'filterByManufacturer', 'manufacturer', 'All Manufacturers');
+    genPanelSearchInput    (id, settings[id]);
+    genPanelResizeButton   (id, settings[id]);
+    genPanelReloadButton   (id, settings[id]);
+    genPanelContents       (id, settings[id]);
 
     insertSourcingDone(id);
 
-    settings.sourcing[id].load();
+    settings[id].load();
 
 }
 function insertSourcingData(id) {
 
-    settings.sourcing[id].timestamp = startPanelContentUpdate(id);
+    settings[id].timestamp = startPanelContentUpdate(id);
 
     let requests    = [
         $.get('/plm/quotes', {
-            link      : settings.sourcing[id].link,
-            timestamp : settings.sourcing[id].timestamp
+            link      : settings[id].link,
+            timestamp : settings[id].timestamp
         }),
     ];
 
-    if((settings.sourcing[id].bookmark)) requests.push($.get('/plm/bookmarks', { link : settings.sourcing[id].link })); 
+    if((settings[id].bookmark)) requests.push($.get('/plm/bookmarks', { link : settings[id].link })); 
 
     Promise.all(requests).then(function(responses) {
 
-        if(stopPanelContentUpdate(responses[0], settings.sourcing[id])) return;
+        if(stopPanelContentUpdate(responses[0], settings[id])) return;
 
-        setPanelBookmarkStatus(id, settings.sourcing[id], responses);
+        setPanelBookmarkStatus(id, settings[id], responses);
 
-        settings.sourcing[id].columns = [];
+        settings[id].columns = [];
 
         let items             = [];
         let listSuppliers     = [];
@@ -8116,8 +8305,8 @@ function insertSourcingData(id) {
         ]
 
         for(let column of columns) {
-            if(includePanelTableColumn(column.fieldId, column.displayName, settings.sourcing[id], settings.sourcing[id].columns.length)) {
-                settings.sourcing[id].columns.push(column);
+            if(includePanelTableColumn(column.fieldId, column.displayName, settings[id], settings[id].columns.length)) {
+                settings[id].columns.push(column);
             }
         }
 
@@ -8137,7 +8326,7 @@ function insertSourcingData(id) {
 
             for(let quote of source.quotes.data) {
 
-                let contentItem = genPanelContentItem(settings.sourcing[id], {
+                let contentItem = genPanelContentItem(settings[id], {
                     title : source.supplierPartNumber + ' ' + supplierName + ' | ' + manufacturerName,
                     subtitle : quote.unitPrice
                 });
@@ -8151,7 +8340,7 @@ function insertSourcingData(id) {
                     { fieldId : 'unit-cost'      , value : quote.unitPrice }
                 ];
     
-                switch(settings.sourcing[id].groupBy) {
+                switch(settings[id].groupBy) {
 
                     case 'supplier':
                         contentItem.group = supplierName;
@@ -8181,7 +8370,7 @@ function insertSourcingData(id) {
         setPanelFilterOptions(id, 'supplier', listSuppliers);
         setPanelFilterOptions(id, 'manufacturer', listManufacturers);
 
-        finishPanelContentUpdate(id, settings.sourcing[id], items);
+        finishPanelContentUpdate(id, settings[id], items);
         insertSourcingDataDone(id, responses[0]);        
  
     });
@@ -8199,7 +8388,7 @@ function insertWorkflowHistory(link, params) {
 
     let id = isBlank(params.id) ? 'workflow-history' : params.id;
     
-    settings.workflowHistory[id] = getPanelSettings(link, params, {
+    settings[id] = getPanelSettings(link, params, {
         headerLabel : 'Workflow History',
     }, [
         [ 'showNextTransitions', true ],
@@ -8208,29 +8397,28 @@ function insertWorkflowHistory(link, params) {
         [ 'transitionsEx'      , ['Cancel', 'Delete'] ]
     ]);
 
-    settings.workflowHistory[id].load = function() { insertWorkflowHistoryData(id); }
+    settings[id].load = function() { insertWorkflowHistoryData(id); }
 
-    genPanelTop(id, settings.workflowHistory[id], 'processes');
-    genPanelHeader(id, settings.workflowHistory[id]);
-    genPanelOpenInPLMButton(id, settings.workflowHistory[id]);
-    genPanelSearchInput(id, settings.workflowHistory[id]);
-    genPanelResizeButton(id, settings.workflowHistory[id]);
-    genPanelReloadButton(id, settings.workflowHistory[id]);
-
-    genPanelContents(id, settings.workflowHistory[id]).addClass('workflow-history-content').removeClass('list');
+    genPanelTop            (id, settings[id], 'processes');
+    genPanelHeader         (id, settings[id]);
+    genPanelOpenInPLMButton(id, settings[id]);
+    genPanelSearchInput    (id, settings[id]);
+    genPanelResizeButton   (id, settings[id]);
+    genPanelReloadButton   (id, settings[id]);
+    genPanelContents       (id, settings[id]).addClass('workflow-history-content').removeClass('list');
 
     insertWorkflowHistoryDone(id);
 
-    settings.workflowHistory[id].load();
+    settings[id].load();
 
 }
 function insertWorkflowHistoryData(id) {
 
-    settings.workflowHistory[id].timestamp = startPanelContentUpdate(id);
+    settings[id].timestamp = startPanelContentUpdate(id);
 
     let params = {
-        link      : settings.workflowHistory[id].link,
-        timestamp : settings.workflowHistory[id].timestamp
+        link      : settings[id].link,
+        timestamp : settings[id].timestamp
     }
 
     let requests = [ 
@@ -8238,20 +8426,20 @@ function insertWorkflowHistoryData(id) {
         $.get('/plm/details',          params)
     ];
 
-    if(settings.workflowHistory[id].showNextTransitions) requests.push($.get('/plm/transitions', params));
+    if(settings[id].showNextTransitions) requests.push($.get('/plm/transitions', params));
 
     Promise.all(requests).then(function(responses) {
 
-        if(stopPanelContentUpdate(responses[0], settings.workflowHistory[id])) return;
+        if(stopPanelContentUpdate(responses[0], settings[id])) return;
 
         let index         = 1;
-        let transitionsIn = settings.workflowHistory[id].transitionsIn;
-        let transitionsEx = settings.workflowHistory[id].transitionsEx;
+        let transitionsIn = settings[id].transitionsIn;
+        let transitionsEx = settings[id].transitionsEx;
         let currentStatus = responses[1].data.currentState.title;
         let elemContent   = $('#' + id + '-content');
 
-        if(settings.workflowHistory[id].showNextTransitions) {
-            if(!settings.workflowHistory[id].finalStates.includes(currentStatus)) {
+        if(settings[id].showNextTransitions) {
+            if(!settings[id].finalStates.includes(currentStatus)) {
 
                 let elemNext = $('<div></div>').addClass('workflow-next');
 
@@ -8289,15 +8477,15 @@ function insertWorkflowHistoryData(id) {
                     let timeStamp = new Date(action.created);
                     let icon      = (index++ === responses[0].data.history.length) ? 'icon-start' : 'icon-check';
 
-                    if((index === 2) && settings.workflowHistory[id].finalStates.includes(currentStatus)) icon = 'icon-finish';
+                    if((index === 2) && settings[id].finalStates.includes(currentStatus)) icon = 'icon-finish';
                     
                     let elemEvent = $('<div></div>').appendTo(elemContent)
                         .addClass('workflow-history-event')
                         .addClass('content-item')
                         .click(function() {
-                            if(!isBlank(settings.workflowHistory[id].onItemClick)) settings.workflowHistory[id].onItemClick($(this));
+                            if(!isBlank(settings[id].onItemClick)) settings[id].onItemClick($(this));
                         }).dblclick(function() {
-                            if(!isBlank(settings.workflowHistory[id].onItemDblClick)) settings.workflowHistory[id].onItemDblClick($(this));
+                            if(!isBlank(settings[id].onItemDblClick)) settings[id].onItemDblClick($(this));
                         });
 
                     let elemAction = $('<div></div>').appendTo(elemEvent)
@@ -8330,7 +8518,7 @@ function insertWorkflowHistoryData(id) {
             }
         }
 
-        finishPanelContentUpdate(id, settings.workflowHistory[id]);
+        finishPanelContentUpdate(id, settings[id]);
         insertWorkflowHistoryDone(id, responses[0].data, responses[1].data);
 
     });
@@ -8341,6 +8529,140 @@ function insertWorkflowHistoryDataDone(id, history, item) {}
 
 
 
+// Insert Workflow Action Dialog
+function insertWorkflowTransitionDialog(link, descriptor, type, transition, callback) {
+
+    appendOverlay(false);
+
+    if(isBlank(type)) type = 'Item';
+
+    let elemDialog        = $('#dialog-workflow-action');
+    let elemDialogContent = $('#dialog-workflow-action-content');
+
+    console.log(transition);
+
+    if(elemDialog.length === 0) {
+
+        elemDialog = $('<div></div>').appendTo($('body'))
+            .addClass('dialog')
+            .attr('id', 'dialog-workflow-action');
+
+        $('<div></div>').appendTo(elemDialog)
+            .addClass('dialog-header')
+            .html('Perform Workflow Action');
+
+        elemDialogContent = $('<div></div>').appendTo(elemDialog)
+            .addClass('dialog-content')
+            .attr('id', 'dialog-workflow-action-content');
+
+        $('<div></div>').appendTo(elemDialogContent)
+            .addClass('label')
+            .html('Workflow Action');
+
+        $('<div></div>').appendTo(elemDialogContent)
+            .addClass('value')
+            .attr('id', 'dialog-workflow-action-name');
+
+        $('<div></div>').appendTo(elemDialogContent)
+            .addClass('label')
+            .html(type);       
+
+        $('<div></div>').appendTo(elemDialogContent)
+            .addClass('value')
+            .attr('id', 'dialog-workflow-action-item');              
+
+        $('<div></div>').appendTo(elemDialogContent)
+            .addClass('label')
+            .html('Current Status');
+
+        $('<div></div>').appendTo(elemDialogContent)
+            .addClass('value')
+            .attr('id', 'dialog-workflow-current-status');
+
+        $('<div></div>').appendTo(elemDialogContent)
+            .addClass('label')
+            .html('New Status');
+
+        $('<div></div>').appendTo(elemDialogContent)
+            .addClass('value')
+            .attr('id', 'dialog-workflow-next-status');
+
+        $('<div></div>').appendTo(elemDialogContent)
+            .addClass('message')
+            .attr('id', 'dialog-workflow-action-comment-required')
+            .html('A comment is required for this action, please provide it below:');
+
+        $('<div></div>').appendTo(elemDialogContent)
+            .addClass('message')
+            .attr('id', 'dialog-workflow-action-comment-optional')
+            .html('A comment may optionally be provided');
+
+        $('<textarea></textarea>').appendTo(elemDialogContent)
+            .attr('id', 'dialog-workflow-action-comment')
+            .attr('placeholder', 'Enter workflow action comment');
+
+        $('<div></div>').appendTo(elemDialogContent)
+            .addClass('message')
+            .attr('id', 'dialog-workflow-action-notify-owner')
+            .html('The ' + type + ' owner(s) will be notified about this status update by mail automatically');            
+
+        let elemDialogFooter = $('<div></div>').appendTo(elemDialog)
+            .addClass('dialog-footer');
+
+        $('<div></div>').appendTo(elemDialogFooter)
+            .addClass('button')
+            .addClass('default')
+            .html('Confirm')
+            .click(function() {
+                $('#dialog-workflow-action').hide();
+                $.post('/plm/transition', {
+                    link       : link,
+                    transition : transition.__self__, 
+                    comment    : $('#dialog-workflow-action-comment').val()
+                }, function() {
+                    $('#overlay').hide();
+                    callback();
+                });
+            })
+
+        $('<div></div>').appendTo(elemDialogFooter)
+            .addClass('button')
+            .html('Cancel')
+            .click(function() {
+                $('#dialog-workflow-action').hide();
+                $('#overlay').hide();
+            })
+
+    }
+
+    elemDialog.show()
+        .removeClass('no-comment')
+        .removeClass('optional-comment')
+        .removeClass('required-comment')
+        .removeClass('no-owner-notification');
+
+    $('#dialog-workflow-action-name').html(transition.name);
+    $('#dialog-workflow-action-item').html(descriptor);
+    $('#dialog-workflow-current-status').html(transition.fromState.title);
+    $('#dialog-workflow-next-status').html(transition.toState.title);
+    $('#dialog-workflow-action-comment').val('');
+
+    if(transition.comments == 'OPTIONAL') {
+        elemDialog.addClass('optional-comment');
+        $('#dialog-workflow-action-comment').focus();
+    } else if(transition.comments == 'REQUIRED') {
+        elemDialog.addClass('required-comment');
+        $('#dialog-workflow-action-comment').focus();
+    } else elemDialog.addClass('no-comment');
+
+    if(!transition.sendEmail) {
+        elemDialog.addClass('no-owner-notification');
+    }
+
+}
+
+
+
 // Insert Change Log
 function insertChangeLog(link, params) {
 
@@ -8348,7 +8670,7 @@ function insertChangeLog(link, params) {
 
     let id = isBlank(params.id) ? 'change-log' : params.id;
     
-    settings.changeLog[id] = getPanelSettings(link, params, {
+    settings[id] = getPanelSettings(link, params, {
         headerLabel : 'Change Log',
         textNoData  : 'No change log entries found'
     }, [
@@ -8360,37 +8682,36 @@ function insertChangeLog(link, params) {
         [ 'usersEx'       , []   ],
     ]);
 
-    settings.changeLog[id].layout = 'table';
-    settings.changeLog[id].load   = function() {  insertChangeLogData(id); }
+    settings[id].layout = 'table';
+    settings[id].load   = function() {  insertChangeLogData(id); }
 
-    genPanelTop(id, settings.changeLog[id], 'managed-items', []);
-    genPanelHeader(id, settings.changeLog[id]);
-    genPanelOpenInPLMButton(id, settings.changeLog[id]);
-    genPanelFilterSelect(id, settings.changeLog[id], 'filterByUser', 'user', 'All Users');
-    genPanelFilterSelect(id, settings.changeLog[id], 'filterByAction', 'action', 'All Actions');
-    genPanelSearchInput(id, settings.changeLog[id]);
-    genPanelResizeButton(id, settings.changeLog[id]);
-    genPanelReloadButton(id, settings.changeLog[id]);
-
-    genPanelContents(id, settings.changeLog[id]);
+    genPanelTop            (id, settings[id], 'managed-items', []);
+    genPanelHeader         (id, settings[id]);
+    genPanelOpenInPLMButton(id, settings[id]);
+    genPanelFilterSelect   (id, settings[id], 'filterByUser', 'user', 'All Users');
+    genPanelFilterSelect   (id, settings[id], 'filterByAction', 'action', 'All Actions');
+    genPanelSearchInput    (id, settings[id]);
+    genPanelResizeButton   (id, settings[id]);
+    genPanelReloadButton   (id, settings[id]);
+    genPanelContents       (id, settings[id]);
 
     insertChangeLogDone(id);
 
-    settings.changeLog[id].load();
+    settings[id].load();
 
 }
 function insertChangeLogData(id) {
 
-    settings.changeLog[id].timestamp = startPanelContentUpdate(id);
+    settings[id].timestamp = startPanelContentUpdate(id);
 
     let params = {
-        link        : settings.changeLog[id].link,
-        timestamp   : settings.changeLog[id].timestamp
+        link        : settings[id].link,
+        timestamp   : settings[id].timestamp
     }
 
     $.get('/plm/logs', params, function(response) {
 
-        if(stopPanelContentUpdate(response, settings.changeLog[id])) return;
+        if(stopPanelContentUpdate(response, settings[id])) return;
 
         let number      = 1;
         let elemContent = $('#' + id + '-content'); 
@@ -8403,17 +8724,17 @@ function insertChangeLogData(id) {
         let columns     = [ 'Date', 'User', 'Action', 'Details' ]
         let counter     = 0;
 
-        if(settings.changeLog[id].number) $('<th></th>').appendTo(elemTHRow).html('#').addClass('change-log-number');
+        if(settings[id].number) $('<th></th>').appendTo(elemTHRow).html('#').addClass('change-log-number');
 
         for(let column of columns) {
-            if(includePanelTableColumn('', column, settings.changeLog[id], counter++)) {
+            if(includePanelTableColumn('', column, settings[id], counter++)) {
                 $('<th></th>').appendTo(elemTHRow)
                     .addClass('col')
                     .html(column);
             }
         }
 
-        if(settings.changeLog[id].tableHeaders) elemTHead.appendTo(elemTable);
+        if(settings[id].tableHeaders) elemTHead.appendTo(elemTable);
 
         for(let entry of response.data) {
 
@@ -8421,10 +8742,10 @@ function insertChangeLogData(id) {
             let action      = entry.action.shortName;
             let elemDetails = $('<div></div>').addClass('change-log-details');
 
-            if((settings.changeLog[id].usersIn.length === 0) || ( settings.changeLog[id].usersIn.includes(user))) {
-                if((settings.changeLog[id].usersEx.length === 0) || (!settings.changeLog[id].usersEx.includes(user))) {
-                    if((settings.changeLog[id].actionsIn.length === 0) || ( settings.changeLog[id].actionsIn.includes(action))) {
-                        if((settings.changeLog[id].actionsEx.length === 0) || (!settings.changeLog[id].actionsEx.includes(action))) {
+            if((settings[id].usersIn.length === 0) || ( settings[id].usersIn.includes(user))) {
+                if((settings[id].usersEx.length === 0) || (!settings[id].usersEx.includes(user))) {
+                    if((settings[id].actionsIn.length === 0) || ( settings[id].actionsIn.includes(action))) {
+                        if((settings[id].actionsEx.length === 0) || (!settings[id].actionsEx.includes(action))) {
 
                             if(!listUsers.includes(user)) listUsers.push(user);
                             if(!listActions.includes(action)) listActions.push(action);
@@ -8433,12 +8754,12 @@ function insertChangeLogData(id) {
                                 .attr('data-filter-user', user)
                                 .attr('data-filter-action', action)
                                 .addClass('content-item').click(function() {
-                                    if(!isBlank(settings.changeLog[id].onItemClick)) settings.changeLog[id].onItemClick($(this));                          
+                                    if(!isBlank(settings[id].onItemClick)) settings[id].onItemClick($(this));                          
                                 }).dblclick(function() {
-                                    if(!isBlank(settings.changeLog[id].onItemDblClick)) settings.changeLog[id].onItemDblClick($(this));                          
+                                    if(!isBlank(settings[id].onItemDblClick)) settings[id].onItemDblClick($(this));                          
                                 });
 
-                            if(settings.changeLog[id].number) $('<td></td>').appendTo(elemRow).html(number++).addClass('change-log-number');
+                            if(settings[id].number) $('<td></td>').appendTo(elemRow).html(number++).addClass('change-log-number');
 
                             if(isBlank(entry.description)) {
 
@@ -8459,7 +8780,7 @@ function insertChangeLogData(id) {
 
                             for(let column of columns) {
 
-                                if(includePanelTableColumn('', column, settings.changeLog[id], counter++)) {
+                                if(includePanelTableColumn('', column, settings[id], counter++)) {
 
                                     let elemCell = $('<td></td>').appendTo(elemRow);
 
@@ -8498,7 +8819,7 @@ function insertChangeLogData(id) {
         setPanelFilterOptions(id, 'user', listUsers);
         setPanelFilterOptions(id, 'action', listActions);
 
-        finishPanelContentUpdate(id, settings.changeLog[id]);
+        finishPanelContentUpdate(id, settings[id]);
         insertChangeLogDataDone(id, response);
    
     });
@@ -8517,9 +8838,9 @@ function insertItemSummary(link, params) {
     if(isBlank(params)) params = {};
 
     let id = isBlank(params.id) ? 'item' : params.id;
-    let selectedTab = (isBlank(settings.summary[id])) ? '' : settings.summary[id].selectedTab;
+    let selectedTab = (isBlank(settings[id])) ? '' : settings[id].selectedTab;
 
-    settings.summary[id] = getPanelSettings(link, params, {}, [
+    settings[id] = getPanelSettings(link, params, {}, [
         [ 'bookmark'        , false ],
         [ 'className'       , ''    ],
         [ 'cloneable'       , false ],
@@ -8538,9 +8859,9 @@ function insertItemSummary(link, params) {
         [ 'afterCloning'    , function(id, link) { console.log('New item link : ' + link ); } ]
     ]);
 
-    settings.summary[id].wsId        = link.split('/')[4];
-    settings.summary[id].load        = function() { setItemSummaryData(id); }
-    settings.summary[id].selectedTab = selectedTab;
+    settings[id].wsId        = link.split('/')[4];
+    settings[id].load        = function() { setItemSummaryData(id); }
+    settings[id].selectedTab = selectedTab;
 
     let elemItemTop = $('#' + id);
 
@@ -8550,32 +8871,32 @@ function insertItemSummary(link, params) {
             .addClass('screen');
     } else elemItemTop.html('');
 
-    if(settings.summary[id].hideHeader) elemItemTop.addClass('no-header');
+    if(settings[id].hideHeader) elemItemTop.addClass('no-header');
 
-    elemItemTop.attr('data-link', settings.summary[id].link)
+    elemItemTop.attr('data-link', settings[id].link)
         .addClass('item')
         .addClass('panel-top')
-        .addClass('workspace-' + settings.summary[id].wsId);
+        .addClass('workspace-' + settings[id].wsId);
 
-    if(isBlank(settings.summary[id].surfaceLevel)) {
+    if(isBlank(settings[id].surfaceLevel)) {
 
-        settings.summary[id].surfaceLevel = getSurfaceLevel(elemItemTop, false);
+        settings[id].surfaceLevel = getSurfaceLevel(elemItemTop, false);
 
-        if(settings.summary[id].surfaceLevel === 'surface-level-0') {
-            settings.summary[id].surfaceLevel = 'surface-level-1';
-            elemItemTop.addClass(settings.summary[id].surfaceLevel);
+        if(settings[id].surfaceLevel === 'surface-level-0') {
+            settings[id].surfaceLevel = 'surface-level-1';
+            elemItemTop.addClass(settings[id].surfaceLevel);
         }
 
     } else {
 
-        if(settings.summary[id].surfaceLevel.indexOf('surface-level') !== 0) settings.summary[id].surfaceLevel = 'surface-level-' + settings.summary[id].surfaceLevel;
-        elemItemTop.addClass(settings.summary[id].surfaceLevel);
+        if(settings[id].surfaceLevel.indexOf('surface-level') !== 0) settings[id].surfaceLevel = 'surface-level-' + settings[id].surfaceLevel;
+        elemItemTop.addClass(settings[id].surfaceLevel);
 
     }
 
-    settings.summary[id].contentSurfaceLevel = getMatchingContentSurfaceLevels(settings.summary[id].surfaceLevel);
+    settings[id].contentSurfaceLevel = getMatchingContentSurfaceLevels(settings[id].surfaceLevel);
 
-    if(!isBlank(settings.summary[id]).className) elemItemTop.addClass(settings.summary[id].className);
+    if(!isBlank(settings[id]).className) elemItemTop.addClass(settings[id].className);
 
     let elemItemHeader          = $('#' + id + '-header');
     let elemItemTitle           = $('#' + id + '-title');
@@ -8602,12 +8923,12 @@ function insertItemSummary(link, params) {
        elemItemSummary.html('');
        elemItemContent.html('');
 
-    genPanelBookmarkButton(id, settings.summary[id]);
-    genPanelCloneButton(id, settings.summary[id]);
-    genPanelOpenInPLMButton(id, settings.summary[id]);
-    genPanelReloadButton(id, settings.summary[id]);
+    genPanelBookmarkButton (id, settings[id]);
+    genPanelCloneButton    (id, settings[id]);
+    genPanelOpenInPLMButton(id, settings[id]);
+    genPanelReloadButton   (id, settings[id]);
 
-    if(settings.summary[id].workflowActions) {
+    if(settings[id].workflowActions) {
         if(elemItemWorkflowActions.length === 0) {
             elemItemWorkflowActions = $('<select></select>').prependTo(elemItemControls)
                 .attr('id', id + '-workflow-actions')
@@ -8618,21 +8939,21 @@ function insertItemSummary(link, params) {
     }
 
     if(elemItemClose.length === 0) { 
-        if(!settings.summary[id].hideCloseButton) {
+        if(!settings[id].hideCloseButton) {
             elemItemClose = $('<div></div>').appendTo(elemItemControls)
                 .attr('id', id + '-close')
                 .addClass('button')
                 .addClass('icon')
                 .addClass('icon-close')
                 .click(function() {
-                    if(isBlank(settings.summary[id].toggleBodyClass))  $('#' + id).hide();
-                    else $('body').removeClass(settings.summary[id].toggleBodyClass);
-                    settings.summary[id].onClickClose(id, settings.summary[id].link);
+                    if(isBlank(settings[id].toggleBodyClass))  $('#' + id).hide();
+                    else $('body').removeClass(settings[id].toggleBodyClass);
+                    settings[id].onClickClose(id, settings[id].link);
                 });
         }
     }
 
-    switch(settings.summary[id].layout) {
+    switch(settings[id].layout) {
 
         case 'dashboard':
             elemItemTop.addClass('with-panels');
@@ -8641,7 +8962,7 @@ function insertItemSummary(link, params) {
         case 'tabs':
             $('<div></div>').attr('id', id + '-tabs').addClass('panel-tabs').appendTo(elemItemTop);
             elemItemTop.addClass('with-tabs').addClass('panel-top');
-            elemItemContent.addClass(settings.summary[id].contentSurfaceLevel);
+            elemItemContent.addClass(settings[id].contentSurfaceLevel);
             break;
 
         case 'sections':
@@ -8651,11 +8972,11 @@ function insertItemSummary(link, params) {
 
     }
 
-    if(settings.summary[id].includeViewer) {
+    if(settings[id].includeViewer) {
         $('<div></div>').attr('id', id + '-viewer').addClass('panel-viewer').appendTo(elemItemTop);
     }
 
-    if(!isBlank(settings.summary[id].headerTopLabel)) {
+    if(!isBlank(settings[id].headerTopLabel)) {
         $('#' + id).addClass('with-top-title');
         let elemTopTitle = $('#' + id + '-title-top');
         if(elemTopTitle.length === 0) {
@@ -8663,22 +8984,22 @@ function insertItemSummary(link, params) {
                 .addClass('panel-title-top')
                 .attr('id', id + '-title-top');
         }
-        elemTopTitle.html(settings.summary[id].headerTopLabel);
+        elemTopTitle.html(settings[id].headerTopLabel);
     }
 
-    if(settings.summary[id].wrapControls) elemItemTop.addClass('wrap-controls');
-    if(settings.summary[id].hideSubtitle) elemItemTop.addClass('no-sub-title');
+    if(settings[id].wrapControls) elemItemTop.addClass('wrap-controls');
+    if(settings[id].hideSubtitle) elemItemTop.addClass('no-sub-title');
 
-    if(!isBlank(settings.summary[id].toggleBodyClass)) $('body').addClass(settings.summary[id].toggleBodyClass);
+    if(!isBlank(settings[id].toggleBodyClass)) $('body').addClass(settings[id].toggleBodyClass);
 
     insertItemSummaryDone(id);
 
-    settings.summary[id].load();
+    settings[id].load();
 
 }
 function setItemSummaryData(id) {
 
-    settings.summary[id].timestamp = new Date().getTime();
+    settings[id].timestamp = new Date().getTime();
 
     // let elemItemDescriptor  = $('#' + id + '-descriptor').html('').addClass('animation');
     // let elemItemStatus      = $('#' + id + '-status').html('').addClass('animation');
@@ -8692,19 +9013,19 @@ function setItemSummaryData(id) {
     $('#' + id).show();
 
     let requests = [
-        $.get('/plm/details'       , { link : settings.summary[id].link, timestamp : settings.summary[id].timestamp }),
-        $.get('/plm/change-summary', { link : settings.summary[id].link }),
-        $.get('/plm/fields'        , { link : settings.summary[id].link, useCache : settings.summary[id].useCache }),
-        $.get('/plm/tabs'          , { link : settings.summary[id].link, useCache : settings.summary[id].useCache })
+        $.get('/plm/details'       , { link : settings[id].link, timestamp : settings[id].timestamp }),
+        $.get('/plm/change-summary', { link : settings[id].link }),
+        $.get('/plm/fields'        , { link : settings[id].link, useCache : settings[id].useCache }),
+        $.get('/plm/tabs'          , { link : settings[id].link, useCache : settings[id].useCache })
     ];
 
-    if((settings.summary[id].bookmark) ) requests.push($.get('/plm/bookmarks'  , { link : settings.summary[id].link }));
-    if((settings.summary[id].cloneable)) requests.push($.get('/plm/permissions', { link : settings.summary[id].link }));
+    if((settings[id].bookmark) ) requests.push($.get('/plm/bookmarks'  , { link : settings[id].link }));
+    if((settings[id].cloneable)) requests.push($.get('/plm/permissions', { link : settings[id].link }));
 
     Promise.all(requests).then(function(responses) {
 
-        if(responses[0].params.timestamp == settings.summary[id].timestamp) {
-            if(responses[0].params.link === settings.summary[id].link) {
+        if(responses[0].params.timestamp == settings[id].timestamp) {
+            if(responses[0].params.link === settings[id].link) {
 
                 $('.animation').removeClass('animation');
 
@@ -8716,16 +9037,16 @@ function setItemSummaryData(id) {
 
                     let stateLabel   = responses[0].data.currentState.title;
                     let stateColor   = '#000';
-                    let statesColors = settings.summary[id].statesColors || settings.summary[id].stateColors;
+                    let statesColors = settings[id].statesColors || settings[id].stateColors;
 
                     for(let statesColor of statesColors) {
                         if(isBlank(statesColor.states)) {
                             if(statesColor.state == stateLabel) {
-                                stateColor = statesColor.color;
+                                stateColor = colors[statesColor.color];
                                 stateLabel = statesColor.label;
                             }
                         } else if (statesColor.states.indexOf(stateLabel) > -1) {
-                            if(!isBlank(statesColor.color)) stateColor = statesColor.color;
+                            if(!isBlank(statesColor.color)) stateColor = colors[statesColor.color];
                             if(!isBlank(statesColor.label)) stateLabel = statesColor.label;
                             break;
                         }
@@ -8776,13 +9097,13 @@ function setItemSummaryData(id) {
 
                 }
 
-                setPanelBookmarkStatus(id, settings.summary[id], responses);
-                setPanelCloneStatus(id, settings.summary[id], responses);
+                setPanelBookmarkStatus(id, settings[id], responses);
+                setPanelCloneStatus(id, settings[id], responses);
 
-                if(settings.summary[id].workflowActions) {
-                    insertWorkflowActions(settings.summary[id].link, {
+                if(settings[id].workflowActions) {
+                    insertWorkflowActions(settings[id].link, {
                         id : id + '-workflow-actions',
-                        onComplete : function() { settings.summary[id].load() }
+                        onComplete : function() { settings[id].load() }
                     });
                 }
 
@@ -8809,23 +9130,24 @@ function insertItemSummaryContents(id, details, fields, tabs) {
         tabLabels[tab.workspaceTabName] = isBlank(tab.name) ? tab.key : tab.name;
     }
 
-    if(settings.summary[id].includeViewer) {
+    if(settings[id].includeViewer) {
         $('#' + id).addClass('includes-viewer');
-        insertViewer(settings.summary[id].link, {
+        insertViewer(settings[id].link, {
             id : id + '-viewer'
         });
     } else {
         $('#' + id).removeClass('includes-viewer');
     }
 
-    for(let content of settings.summary[id].contents) {
+    for(let content of settings[id].contents) {
 
         if(isBlank(content.params)) content.params = {};
 
-        let link      =  content.link || settings.summary[id].link;
-        let contentId = (isBlank(content.params.id)) ? 'item-' + content.type : content.params.id;
-        let className = (isBlank(content.className)) ? settings.summary[id].contentSurfaceLevel : content.className;
-        let elemTop   = $('#' + contentId);
+        let link         =  content.link || settings[id].link;
+        let contentId    = (isBlank(content.params.id)) ? 'item-' + content.type : content.params.id;
+        let className    = (isBlank(content.className)) ? settings[id].contentSurfaceLevel : content.className;
+        let sectionClass = getClassificationSection(details.sections);
+        let elemTop      = $('#' + contentId);
         
         content.params.id = contentId;
 
@@ -8835,7 +9157,7 @@ function insertItemSummaryContents(id, details, fields, tabs) {
             } else link = content.link;
         }
 
-        if(settings.summary[id].layout === 'sections') {
+        if(settings[id].layout === 'sections') {
             content.params.headerToggle = true;
         }
 
@@ -8854,6 +9176,24 @@ function insertItemSummaryContents(id, details, fields, tabs) {
                     insertDetails(link, content.params);
                 }
                 break;
+
+            case 'classification':
+                if(sectionClass.hasOwnProperty('link')) {
+                    if(tabsAccessible.includes('ITEM_DETAILS') || (!isBlank(content.params.link))) {
+                        insertItemSummaryContentTab(id, contentId, sectionClass.title, content.params, isFirst);  
+                        insertItemClassification(link, content.params);
+                    }
+                }
+                break;
+
+            case 'similar-items':
+                if(sectionClass.hasOwnProperty('link')) {
+                    if(tabsAccessible.includes('ITEM_DETAILS') || (!isBlank(content.params.link))) {
+                        insertItemSummaryContentTab(id, contentId, content.label, content.params, isFirst);
+                        insertSimilarItems(link, content.params);
+                    }
+                }
+                break;                
 
             case 'images':
                 if(tabsAccessible.includes('ITEM_DETAILS') || (!isBlank(content.params.link))) {
@@ -8874,20 +9214,20 @@ function insertItemSummaryContents(id, details, fields, tabs) {
                 if(isBlank(content.params.fieldIdViewable)) {
                     if(tabsAccessible.includes('PART_ATTACHMENTS')) {
                         insertItemSummaryContentTab(id, contentId, 'Viewer', content.params, isFirst);
-                        if(settings.summary[id].layout !== 'tabs') insertViewer(settings.summary[id].link, content.params);
+                        if(settings[id].layout !== 'tabs') insertViewer(settings[id].link, content.params);
                     }
                 } else {
-                    settings.summary[id].linkViewable = getSectionFieldValue(details.sections, content.params.fieldIdViewable, '', 'link');
+                    settings[id].linkViewable = getSectionFieldValue(details.sections, content.params.fieldIdViewable, '', 'link');
                     insertItemSummaryContentTab(id, contentId, 'Viewer', content.params, isFirst);
                     viewerFeatures.markup = true;
-                    if(settings.summary[id].layout !== 'tabs') insertViewer(settings.summary[id].linkViewable, content.params);
+                    if(settings[id].layout !== 'tabs') insertViewer(settings[id].linkViewable, content.params);
                 }
                 break;
 
             case 'markup':
                 if(tabsAccessible.includes('PART_ATTACHMENTS')|| (!isBlank(content.link))) {
                     insertItemSummaryContentTab(id, contentId, 'Markup', content.params, isFirst);          
-                    insertViewerMarkups(contentId, settings.summary[id].link, content.params, details.sections, fields);
+                    insertViewerMarkups(contentId, settings[id].link, content.params, details.sections, fields);
                 }      
                 break;
 
@@ -8982,9 +9322,9 @@ function insertItemSummaryContents(id, details, fields, tabs) {
 
     if(elemTabs.length > 0) {
         let selectFirst = true;
-        if(settings.summary[id].saveTabSelection) {
+        if(settings[id].saveTabSelection) {
             elemTabs.children().each(function() {
-                if($(this).attr('data-content-id') === settings.summary[id].selectedTab) {
+                if($(this).attr('data-content-id') === settings[id].selectedTab) {
                     selectFirst = false;
                     $(this).click();
                 }
@@ -8999,26 +9339,24 @@ function insertItemSummaryContents(id, details, fields, tabs) {
 }
 function insertItemSummaryContentTab(id, contentId, label, params, isFirst) {
 
-    if(settings.summary[id].layout !== 'tabs') return;
+    if(settings[id].layout !== 'tabs') return;
 
     let elemTabs = $('#' + id + '-tabs');
-    let tabLabel = isBlank(params.headerLabel) ? label : params.headerLabel;
+    let tabLabel = params.headerLabel || label;
     
-
-
     $('<div></div>').appendTo(elemTabs)
         .attr('data-content-id', contentId)
         .html(tabLabel)
         .click(function() {
 
             $(this).addClass('selected').siblings().removeClass('selected');
-            $(this).css('background', 'var(--color-' + settings.summary[id].contentSurfaceLevel + ')') ;
+            $(this).css('background', 'var(--color-' + settings[id].contentSurfaceLevel + ')') ;
             $(this).siblings().css('background', 'none');
 
             let contentId    = $(this).attr('data-content-id');
             let elemContents = $('#' + id + '-content');
 
-            settings.summary[id].selectedTab = contentId;
+            settings[id].selectedTab = contentId;
 
             elemContents.children().each(function() {
                 if($(this).attr('id') === contentId) {
@@ -9029,14 +9367,26 @@ function insertItemSummaryContentTab(id, contentId, label, params, isFirst) {
             });
 
             if(label === 'Viewer') {
-                if(isBlank(settings.summary[id].linkViewable)) insertViewer(settings.summary[id].link, params);
-                else insertViewer(settings.summary[id].linkViewable, params);
+                if(isBlank(settings[id].linkViewable)) insertViewer(settings[id].link, params);
+                else insertViewer(settings[id].linkViewable, params);
             }
 
         });
     
     params.hideHeaderLabel = true;
     params.hidePanel       = !isFirst;
+
+}
+function insertItemSummaryContentPanel(elemTop, id, content, surfaceLevel) {
+
+    let elemContentPanel = $('#' + id);
+    
+    if(elemContentPanel.length > 0) return;
+    
+    $('<div></div>').appendTo(elemTop)
+        .attr('id', id)
+        .addClass(surfaceLevel)
+        .addClass('item-' + content.type.toLowerCase());
 
 }
 function insertItemSummaryDone(id) {}

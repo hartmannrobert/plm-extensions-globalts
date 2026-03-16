@@ -2,22 +2,23 @@ extends ../framework/layout
 
 block head
 
-    link(rel='stylesheet', href='/stylesheets/admin/workspace-comparison.css')
+    link(rel='stylesheet', href='/stylesheets/admin/comparison.css')
     link(rel='stylesheet', href='/stylesheets/framework/console.css')
+    
     script(src='/javascripts/framework/console.js') 
-    script(src='/javascripts/admin/workspace-comparison.js') 
-    script.
-        menu = !{JSON.stringify(menu)};
+    script(src='/javascripts/admin/comparison.js') 
 
 block body
 
-    body
+    body.mode-all
         
         #header.dark
             #header-logo
             #header-title=title
-            #header-subtitle Keep workspaces in sync across your tenants
+            #header-subtitle Keep configuration changes in sync across your tenants
             #header-toolbar
+                #export-base.button.with-icon.icon-download(title='Export base tenant configuration') Export Base Tenant
+                #export-target.button.with-icon.icon-download(title='Export base tenant configuration') Export Target Tenant
                 #header-avatar
         .screen.surface-level-2#comparison
             
@@ -31,7 +32,7 @@ block body
                     div
                     div.header Base Tenant 
                     div.header Target Tenant 
-                    div.label Tenant Name
+                    div.label Tenant Names
                     div.input
                         input#source-tenant(type='text')
                     div.input
@@ -47,10 +48,14 @@ block body
                     #comparison-stop.button.with-icon.icon-stop.disabled Stop
             
             #console.surface-level-4
+                #console-toolbar
+                    #console-clear.button.icon.icon-delete(title='Clear console contents')
+                    #console-scroll.button.with-toggle.toggle-on Auto-Scroll
                 #console-header.surface-level-4 Console                    
                 #console-content.surface-level-4
-                #console-toggle.button.icon.icon-chevron-right
+                #console-toggle.button.icon(title='Hide / Unhide Console Panel')
 
+            //- #comparison-results.surface-level-2
             #comparison-results.surface-level-2
                 #result-settings
                     .result-icon.icon.icon-item
@@ -59,6 +64,14 @@ block body
                     .result-color.icon.comparison-result.filled
                     .result-actions#actions-settings
                     .result-compare(title='Compare Workspace Settings of both tenants')
+                        .button.icon.icon-compare
+                #result-roles
+                    .result-icon.icon.icon-released
+                    .result-label Permissions (Roles)
+                    .result-summary#summary-roles
+                    .result-color.icon.comparison-result.filled
+                    .result-actions#actions-roles
+                    .result-compare(title='Compare Roles of both tenants')
                         .button.icon.icon-compare
                 #result-tabs
                     .result-icon.icon.icon-tabs
@@ -148,14 +161,6 @@ block body
                     .result-actions#actions-picklists
                     .result-compare(title='Compare Picklists of both tenants')
                         .button.icon.icon-compare
-                #result-roles
-                    .result-icon.icon.icon-released
-                    .result-label Permissions (Roles)
-                    .result-summary#summary-roles
-                    .result-color.icon.comparison-result.filled
-                    .result-actions#actions-roles
-                    .result-compare(title='Compare Roles of both tenants')
-                        .button.icon.icon-compare
                 #result-scripts
                     .result-icon.icon.icon-script
                     .result-label Scripts Sources
@@ -172,6 +177,56 @@ block body
                     .result-actions#actions-libraries
                     .result-compare(title='Compare Scripts of both tenants')
                         .button.icon.icon-compare
+
+            #comparison-tabs.tabs.surface-level-2
+                .icon-folder.filled Workspaces
+                .icon-code Scripts
+                .icon-picklist Picklists
+                .icon-role Roles
+                .icon-group Groups
+
+            #comparison-contents.surface-level-2
+                #comparison-workspaces
+                    .comparison-contents-toolbar
+                        .comparison-contents-actions
+                            .comparison-update.button.with-icon.icon-refresh(data-context='workspaces') Update Comparison
+                        #comparison-workspaces-filters.comparison-contents-filters
+                            input.button.hidden(type="text" placeholder='Type to search')
+                            select.button.hidden(name="")                   
+                    #comparison-workspaces-table.comparison-contents-table.no-scrollbar
+                #comparison-scripts
+                    .comparison-contents-toolbar
+                        .comparison-contents-actions
+                            .comparison-update.button.with-icon.icon-refresh(data-context='scripts') Update Comparison
+                            .button.with-toggle.toggle-off#download-modified-scripts Download Non-Matching Scripts
+                        #comparison-scripts-filters.comparison-contents-filters
+                            input.button.hidden(type="text" placeholder='Type to search')
+                            select.button.hidden(name="")                    
+                    #comparison-scripts-table.comparison-contents-table.no-scrollbar
+                #comparison-picklists
+                    .comparison-contents-toolbar
+                        .comparison-contents-actions
+                            .comparison-update.button.with-icon.icon-refresh(data-context='picklists') Update Comparison
+                        #comparison-picklists-filters.comparison-contents-filters
+                            input.button.hidden(type="text" placeholder='Type to search')
+                            select.button.hidden(name="")                     
+                    #comparison-picklists-table.comparison-contents-table.no-scrollbar
+                #comparison-roles
+                    .comparison-contents-toolbar
+                        .comparison-contents-actions
+                            .comparison-update.button.with-icon.icon-refresh(data-context='roles') Update Comparison
+                        #comparison-roles-filters.comparison-contents-filters
+                            input.button.hidden(type="text" placeholder='Type to search')
+                            select.button.hidden(name="")                
+                    #comparison-roles-table.comparison-contents-table.no-scrollbar            
+                #comparison-groups
+                    .comparison-contents-toolbar
+                        .comparison-contents-actions
+                            .comparison-update.button.with-icon.icon-refresh(data-context='groups') Update Comparison
+                        #comparison-groups-filters.comparison-contents-filters
+                            input.button.hidden(type="text" placeholder='Type to search')
+                            select.button.hidden(name="")                   
+                    #comparison-groups-table.comparison-contents-table.no-scrollbar            
 
             #dialog-limitations.dialog
                 .dialog-header Limitations
@@ -210,3 +265,5 @@ block body
                 .dialog-content#report-content
                 .dialog-footer
                     #close-report.button.default Close
+
+            iframe#frame-download(name='frame-download').hidden

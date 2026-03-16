@@ -13,6 +13,9 @@ body {
     padding       : 10px 20px;
     text-align    : center;
 }
+h1 {
+    margin-top : 64px;
+}
 h2 {
     border-top  : 2px solid var(--color-surface-level-5);
     margin-top  : 52px;

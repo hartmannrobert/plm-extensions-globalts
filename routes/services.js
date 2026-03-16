@@ -263,8 +263,7 @@ router.get('/storage/contents', function(req, res, next) {
 });
 
 
-
-// Get list of files and folders in defined foleder within /storage
+// Get Chrome Extensions configuration settings
 router.get('/chrome', function(req, res, next) {
 
     console.log(' ');
@@ -275,6 +274,59 @@ router.get('/chrome', function(req, res, next) {
     console.log();
 
     res.json(req.app.locals.chrome);
+    
+});
+
+
+// Download Chrome Extensions installation files
+router.get('/chrome-installer', function(req, res, next) {
+
+    let path = 'chrome';
+
+    let response = {
+        path  : path,
+        files : [],
+        url   : '/services/chrome-installer'
+    };    
+
+    let redirectUri = req.app.locals.redirectUri;
+    let baseURL     = redirectUri.split('/callback')[0];
+
+    if(fs.existsSync(path)) {
+        fs.readdir(path, function (err, files) {
+            files.forEach(function (file) {
+                let filePath = path + '/' + file;
+                if(!fs.lstatSync(filePath).isDirectory()) {
+                    if(file.indexOf('.') > 0) {
+
+                        let suffix   = file.split('.')[1];
+                        let encoding = (suffix == 'png') ? 'base64' : 'utf8';
+                        let data     = '';
+
+                        if(encoding === 'utf8') {
+                            data = fs.readFileSync(path + '/' + file, 'utf8');
+                            data = data.replaceAll('http://localhost:8080', baseURL);
+                        } else {
+                            data = fs.readFileSync(path + '/' + file);
+                            data = data.toString("base64");
+                        }
+
+                        response.files.push({
+                            name     : file,
+                            data     : data,
+                            encoding : encoding
+                        });
+
+                    }
+                }
+            });
+            res.json(response);
+        });
+    } else { 
+        response.error   = true;
+        response.message = 'Folder does not exist';
+        res.json(response); 
+    }
     
 });
 

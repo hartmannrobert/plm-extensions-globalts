@@ -1,21 +1,24 @@
 let fields, sections, bomViewIdItems;
-let urlParameters = getURLParameters();
-let links         = {};
-let urns = {
-    'thumbnail'     : '', 
-    'partNumber'    : '', 
-    'title'         : '', 
-    'description'   : '', 
-    'spareWearPart' : '', 
-    'material'      : '', 
-    'mass'          : '',
-    'dimensions'    : ''
+let workspaceIds = {};
+let bomPartList  = [];
+let links        = {};
+let user         = {};
+let urns         = {
+    thumbnail     : '', 
+    partNumber    : '', 
+    title         : '', 
+    description   : '', 
+    spareWearPart : '', 
+    material      : '', 
+    mass          : '',
+    dimensions    : ''
 }
 
 // let bom, flatBOM;
 let listServiceItems      = { spareParts : [], kit : [], offering : [], wearParts : []};
 let wsProblemReports      = { id : '', sections : [], fields : [] };
 let wsSparePartsRequests  = { id : '', sections : [], fields : [] };
+let finishedLoading       = {};
 let paramsItemDetails     = {}
 let paramsItemAttachments = {}
 let paramsDocumentation   = {}
@@ -24,7 +27,7 @@ let paramsProcesses       = {
     createWSID          : '',
     createHeaderLabel       : 'Create Problem Report',
     createContextItemFields : ['AFFECTED_ITEM'],
-    createViewerImageFields : ['IMAGE_1'],
+    createViewerImageFields : [],
     editable            : true,
     fieldIdMarkup       : '',
     openInPLM           : true,
@@ -40,17 +43,26 @@ $(document).ready(function() {
     appendOverlay();
     insertMenu();
 
-    paramsProcesses.createPerformTransition = config.service.problemReports.transitionOnCreate;
+    paramsProcesses.createPerformTransition = config.problemReports.transitionOnCreate;
+
+    workspaceIds = {
+        products           : config.products.workspaceId           || common.workspaceIds.products,
+        sparePartsRequests : config.sparePartsRequests.workspaceId || common.workspaceIds.sparePartsRequests,
+        problemReports     : config.problemReports.workspaceId     || common.workspaceIds.problemReports,
+        assets             : config.assets.workspaceId             || common.workspaceIds.assets,
+        orderProjects      : config.orderProjects.workspaceId      || common.workspaceIds.orderProjects,
+        assetServices      : config.assetServices.workspaceId      || common.workspaceIds.assetServices,
+    }
     
     let requests = [ 
-        $.get('/plm/me', { useCache : false }),
-        $.get('/plm/sections', { wsId : config.service.sparePartsRequests.workspaceId, useCache : true }),
-        $.get('/plm/bom-view-by-name', { wsId : config.items.wsId, name : config.service.items.bomViewName, useCache : true })
+        $.get('/plm/me', { useCache : true }),
+        $.get('/plm/sections', { wsId : workspaceIds.sparePartsRequests, useCache : true }),
+        $.get('/plm/bom-view-by-name', { wsId : common.workspaceIds.items, name : config.items.bomViewName, useCache : true })
     ];
 
     getFeatureSettings('service', requests, function(responses) {
 
-        let user = responses[0].data;
+        user           = responses[0].data;
         bomViewIdItems = responses[2].data.id;
 
         $('#request-name'   ).val(user.displayName || '');
@@ -61,43 +73,42 @@ $(document).ready(function() {
         $('#request-postal' ).val(user.postal      || '');
         $('#request-country').val(user.country     || '');  
 
-        paramsProcesses.createWSID    = config.service.problemReports.workspaceId;
-        paramsProcesses.workspacesIn  = [config.service.problemReports.workspaceId.toString()];
-        paramsProcesses.fieldIdMarkup = config.service.problemReports.fieldIdImage;
-        wsProblemReports.id           = config.service.problemReports.workspaceId;
-        wsSparePartsRequests.id       = config.service.sparePartsRequests.workspaceId;       
-        wsSparePartsRequests.sections = responses[1].data;       
-        
-        paramsItemDetails        = config.service.paramsItemDetails;
+        paramsProcesses.createViewerImageFields.push(config.problemReports.fieldIdImage);
+
+        paramsProcesses.createWSID    = workspaceIds.problemReports;
+        paramsProcesses.workspacesIn  = [workspaceIds.problemReports.toString()];
+        wsProblemReports.id           = workspaceIds.problemReports;
+        wsSparePartsRequests.id       = workspaceIds.sparePartsRequests;       
+        wsSparePartsRequests.sections = responses[1].data;
+
+        paramsItemDetails        = config.paramsItemDetails;
         paramsItemDetails.id     = 'details-top';
-        paramsItemAttachments    = config.service.paramsItemAttachments;
+        paramsItemAttachments    = config.paramsItemAttachments;
         paramsItemAttachments.id = 'details-bottom';
         
-        paramsDocumentation            = config.service.paramsDocumentation;
+        paramsDocumentation            = config.paramsDocumentation;
         paramsDocumentation.id         = 'documentation';
         paramsDocumentation.hideHeader = true;
         
         setUIElements();
-        setLandingPage(user.displayName);
-        setUIEvents();      
-
+        setUIEvents();   
+        
         if(urlParameters.link !== '') {
 
-            console.log(urlParameters);
+            $('body').addClass('screen-main').removeClass('screen-landing').removeClass('screen-request');
 
-            if(urlParameters.wsidcontext == config.service.assets.workspaceId) {
+            if(urlParameters.wsidcontext == workspaceIds.assets) {
                 let link = '/api/v3/workspaces/' + urlParameters.wsidcontext + '/items/' + urlParameters.dmsidcontext;
-                openSelectedProductOrAsset(link, 'assets', config.service.assets.fieldIDs);
-            } else if(urlParameters.wsidcontext == config.service.products.workspaceId) {
+                openSelectedProductOrAsset(link, 'assets', config.assets.fieldIDs);
+            } else if(urlParameters.wsidcontext == workspaceIds.products) {
                 let link = '/api/v3/workspaces/' + urlParameters.wsidcontext + '/items/' + urlParameters.dmsidcontext;
-                openSelectedProductOrAsset(link, 'products', config.service.products.fieldIDs);
+                openSelectedProductOrAsset(link, 'products', config.products.fieldIDs);
             } else if(urlParameters.link !== '') {
-                console.log('3');
                 links.ebom = urlParameters.link;
                 openItem();
             }
 
-        }
+        } else setLandingPage();
 
     });
     
@@ -145,8 +156,8 @@ function setUIElements() {
         $('#assets'  ).remove();
     }
 
-    $('#tab-your-requests').html(config.service.labels.homeSparePartRequests);
-    $('#tab-your-problems').html(config.service.labels.homeProblemReports);
+    $('#tab-your-requests').html(config.labels.homeSparePartRequests);
+    $('#tab-your-problems').html(config.labels.homeProblemReports);
 
     if(!applicationFeatures.manageSparePartRequests) {
         if(!applicationFeatures.manageProblemReports) {
@@ -156,28 +167,34 @@ function setUIElements() {
     } 
 
 }
-function setLandingPage(userName) {
+function setLandingPage() {
+
+    $('#landing').show();
+
+    if(!$('body').hasClass('home-pending')) return;
+
+    $('body').removeClass('home-pending');
 
     if(applicationFeatures.homeButton || isBlank(urlParameters.dmsId)) {
 
         if(urlParameters.type !== 'assets') {
 
-            if(!isBlank(config.service.products.workspaceId)) {
+            if(!isBlank(workspaceIds.products)) {
                 
-                insertResults(config.service.products.workspaceId, config.service.products.filter ,{
+                insertResults(workspaceIds.products, config.products.filter ,{
                     id              : 'products',
-                    headerLabel     : config.service.products.headerLabel, 
-                    icon            : config.service.products.icon,
-                    groupBy         : config.service.products.groupBy,
-                    contentSize     : config.service.products.contentSize,
-                    // sortBy          : config.service.products.sortBy, 
-                    tileImage       : config.service.products.tileImage, 
-                    tileTitle       : config.service.products.tileTitle, 
-                    tileSubtitle    : config.service.products.tileSubtitle, 
+                    headerLabel     : config.products.headerLabel, 
+                    icon            : config.products.icon,
+                    groupBy         : config.products.groupBy,
+                    contentSize     : config.products.contentSize,
+                    // sortBy          : config.products.sortBy, 
+                    tileImage       : config.products.tileImage, 
+                    tileTitle       : config.products.tileTitle, 
+                    tileSubtitle    : config.products.tileSubtitle, 
                     search          : true,
                     layout          : 'grid',
                     groupLayout     : 'horizontal',
-                    onClickItem : function(elemClicked) { openSelectedProductOrAsset(elemClicked.attr('data-link'), 'product', config.service.products.fieldIDs); }
+                    onClickItem : function(elemClicked) { openSelectedProductOrAsset(elemClicked.attr('data-link'), 'product', config.products.fieldIDs); }
                 });
 
             }
@@ -185,13 +202,13 @@ function setLandingPage(userName) {
         } else {
 
             let filterAssetServices = [{
-                field       : config.service.assetServices.fieldIDs.assignee,
+                field       : config.assetServices.fieldIDs.assignee,
                 type        : 0,
                 comparator  : 5,
-                value       : userName          
+                value       : user.displayName          
             }];
 
-            for(let status of config.service.assetServices.hideStates) {
+            for(let status of config.assetServices.hideStates) {
                 filterAssetServices.push({
                     field       : 'WF_CURRENT_STATE',
                     type        : 1,
@@ -200,9 +217,9 @@ function setLandingPage(userName) {
                 });
             }
 
-            insertResults(config.service.assetServices.workspaceId, filterAssetServices, {
+            insertResults(workspaceIds.assetServices, filterAssetServices, {
                 id          : 'services',
-                headerLabel : config.service.assetServices.headerLabel,
+                headerLabel : config.assetServices.headerLabel,
                 layout      : 'list',
                 contentSize : 'xs',
                 tileIcon    : 'icon-service',
@@ -214,7 +231,7 @@ function setLandingPage(userName) {
 
             let filterAssetProjects = [];                
 
-            for(let status of config.service.projects.hideStates) {
+            for(let status of config.orderProjects.hideStates) {
                 filterAssetProjects.push({
                     field       : 'WF_CURRENT_STATE',
                     type        : 1,
@@ -223,15 +240,15 @@ function setLandingPage(userName) {
                 });
             }
 
-            insertResults(config.service.projects.workspaceId, filterAssetProjects, {
+            insertResults(workspaceIds.orderProjects, filterAssetProjects, {
                 id             : 'projects',
-                headerLabel    : config.service.projects.headerLabel,
+                headerLabel    : config.orderProjects.headerLabel,
                 layout         : 'grid',
                 contentSize    : 'l',
                 tileImage      : 'IMAGE',
                 tileTitle      : 'TITLE',
-                tileSubtitle   : config.service.projects.tileSubtitle,
-                tileDetails    : config.service.projects.tileDetails,
+                tileSubtitle   : config.orderProjects.tileSubtitle,
+                tileDetails    : config.orderProjects.tileDetails,
                 reload         : true,
                 search         : true,
                 useCache       : true,
@@ -242,13 +259,16 @@ function setLandingPage(userName) {
 
         }
 
+    } else {
+        applicationFeatures.manageSparePartRequests = false;
+        applicationFeatures.manageProblemReports    = false;
     }
 
     if(applicationFeatures.manageSparePartRequests) {
 
         let params = {
             id           : 'your-requests',
-            headerLabel  : config.service.labels.homeSparePartRequests,
+            headerLabel  : config.labels.homeSparePartRequests,
             layout       : 'list',
             contentSize  : 'xs',
             tileIcon     : 'icon-package',
@@ -257,7 +277,7 @@ function setLandingPage(userName) {
             reload       : true,
             tileTitle    : 'DESCRIPTOR',
             tileSubtitle : 'REQUEST_DATE',
-            stateColors  : config.service.sparePartsRequests.stateColors,
+            stateColors  : config.sparePartsRequests.stateColors,
             onClickItem  : function(elemClicked) { openRequest(elemClicked); }
         };
 
@@ -269,11 +289,11 @@ function setLandingPage(userName) {
             params.id = 'your-processes';
         }
 
-        insertResults(config.service.sparePartsRequests.workspaceId, [{
+        insertResults(workspaceIds.sparePartsRequests, [{
             field       : 'OWNER_USERID',
             type        : 3,
             comparator  : 15,
-            value       : userName
+            value       : user.displayName
         },{
             field       : 'WF_CURRENT_STATE',
             type        : 1,
@@ -292,7 +312,7 @@ function setLandingPage(userName) {
 
         let params = {
             id             : 'your-problems',
-            headerLabel    : config.service.labels.homeProblemReports,
+            headerLabel    : config.labels.homeProblemReports,
             layout         : 'list',
             contentSizes   : ['l', 'm', 'xs', 'xxs'],
             search         : true,
@@ -311,7 +331,7 @@ function setLandingPage(userName) {
                 fieldId : 'SOURCE',
                 prefix  : 'PR Source'
             }],
-            stateColors : config.service.problemReports.stateColors,
+            stateColors : config.problemReports.stateColors,
             onClickItem : function(elemClicked) { openProblemReport(elemClicked); }
         };
 
@@ -323,11 +343,11 @@ function setLandingPage(userName) {
             params.id = 'your-processes';
         }            
 
-        insertResults(config.service.problemReports.workspaceId, [{
+        insertResults(workspaceIds.problemReports, [{
             field       : 'OWNER_USERID',
             type        : 3,
             comparator  : 15,
-            value       : userName
+            value       : user.displayName
         },{
             field       : 'WF_CURRENT_STATE',
             type        : 1,
@@ -337,29 +357,29 @@ function setLandingPage(userName) {
         
     } else $('#tab-your-problems').remove();
 
-    if(!isBlank(dmsId)) {
+    
+    // if(!isBlank(dmsId)) {
         
-        $('body').addClass('screen-main').removeClass('screen-landing').removeClass('screen-request');
+    //     $('body').addClass('screen-main').removeClass('screen-landing').removeClass('screen-request');
 
-        let params       = document.location.href.split('?')[1].split('&');
-        let wsidcontext  = null;
-        let dmsidcontext = null;
+    //     let params       = document.location.href.split('?')[1].split('&');
+    //     let wsidcontext  = null;
+    //     let dmsidcontext = null;
 
-        for(let param of params) {
-                    if(param.toLowerCase().indexOf('wsidcontext=' ) === 0) { wsidcontext  = param.split('=')[1]; }
-            else if(param.toLowerCase().indexOf('dmsidcontext=') === 0) { dmsidcontext = param.split('=')[1]; }
-        }
+    //     for(let param of params) {
+    //                 if(param.toLowerCase().indexOf('wsidcontext=' ) === 0) { wsidcontext  = param.split('=')[1]; }
+    //         else if(param.toLowerCase().indexOf('dmsidcontext=') === 0) { dmsidcontext = param.split('=')[1]; }
+    //     }
 
-        if(!isBlank(wsidcontext)) {
-            if(!isBlank(dmsidcontext)) {
-                links.context = '/api/v3/workspaces/' + wsidcontext + '/items/' + dmsidcontext;
-            }
-        }
+    //     if(!isBlank(wsidcontext)) {
+    //         if(!isBlank(dmsidcontext)) {
+    //             links.context = '/api/v3/workspaces/' + wsidcontext + '/items/' + dmsidcontext;
+    //         }
+    //     }
 
-        openItem();
+    //     openItem();
 
-    } else $('#landing').show();
-
+    // } else $('#landing').show();
 
 }
 function setUIEvents() {
@@ -374,6 +394,7 @@ function setUIEvents() {
             let url = '/service?theme=' + theme;
             if(!isBlank(urlParameters.type)) url += '&type=' + urlParameters.type;
             window.history.replaceState(null, null, url);
+            setLandingPage();
         });
     }
 
@@ -452,6 +473,7 @@ function setUIEvents() {
             .removeClass('screen-request'); 
     });
 
+    if(isiPad) $('#toggle-bom').click();
 }
 
 
@@ -470,8 +492,8 @@ function selectProject(elemClicked) {
 
         $('body').removeClass('no-assets-list');
 
-        insertResults(config.service.assets.workspaceId, [{
-            field       : config.service.assets.fieldIDs.project,
+        insertResults(workspaceIds.assets, [{
+            field       : config.assets.fieldIDs.project,
             type        : 0,
             comparator  : 15,
             value       : descriptor
@@ -480,11 +502,11 @@ function selectProject(elemClicked) {
             headerLabel  : 'Assets of ' + descriptor,
             layout       : 'table',
             contentSize  : 'm',
-            fields       : config.service.assets.tableColumns,
+            fields       : config.assets.tableColumns,
             useCache     : true,
             search       : true,
             openInPLM    : applicationFeatures.openInPLM,
-            onClickItem  : function(elemClicked) { openSelectedProductOrAsset(elemClicked.attr('data-link'), 'asset', config.service.assets.fieldIDs); }
+            onClickItem  : function(elemClicked) { openSelectedProductOrAsset(elemClicked.attr('data-link'), 'asset', config.assets.fieldIDs); }
         });
 
     }
@@ -501,11 +523,11 @@ function openRequest(elemClicked) {
         bookmark : false,
         contents : [
             { type : 'workflow-history', className : 'surface-level-1', params : { id : 'request-workflow-history' } },
-            { type : 'details'         , className : 'surface-level-1', params : { id : 'request-details', expandSections : config.service.sparePartsRequests.sectionsExpanded, suppressLinks : true, sectionsEx : config.service.sparePartsRequests.sectionsExcluded } },
-            { type : 'grid'            , className : 'surface-level-1', params : { id : 'request-grid', headerLabel : 'Part List', fieldsEx : config.service.sparePartsRequests.gridColumnsExcluded } },
+            { type : 'details'         , className : 'surface-level-1', params : { id : 'request-details', expandSections : config.sparePartsRequests.sectionsExpanded, suppressLinks : true, sectionsEx : config.sparePartsRequests.sectionsExcluded } },
+            { type : 'grid'            , className : 'surface-level-1', params : { id : 'request-grid', headerLabel : 'Part List', fieldsEx : config.sparePartsRequests.gridColumnsExcluded } },
             { type : 'attachments'     , className : 'surface-level-1', params : { id : 'request-attachments', editable : true, layout : 'tiles', singleToolbar : 'controls' } },
         ],
-        statesColors    : config.service.sparePartsRequests.stateColors,  
+        statesColors    : config.sparePartsRequests.stateColors,  
         layout          : 'dashboard',
         reload          : false,
         openInPLM       : applicationFeatures.openInPLM,
@@ -521,11 +543,11 @@ function openProblemReport(elemClicked) {
         bookmark : false,
         contents : [
             { type : 'workflow-history', className : 'surface-level-1', params : { id : 'request-workflow-history' } },
-            { type : 'details'         , className : 'surface-level-1', params : { id : 'request-details', expandSections : config.service.sparePartsRequests.sectionsExpanded, suppressLinks : true, sectionsEx : config.service.sparePartsRequests.sectionsExcluded } },
-            { type : 'grid'            , className : 'surface-level-1', params : { id : 'request-grid', fieldsEx : config.service.sparePartsRequests.gridColumnsExcluded } },
+            { type : 'details'         , className : 'surface-level-1', params : { id : 'request-details', expandSections : config.problemReports.sectionsExpanded, suppressLinks : true, sectionsEx : config.problemReports.sectionsExcluded } },
+            { type : 'grid'            , className : 'surface-level-1', params : { id : 'request-grid', headerLabel : 'Notes' } },
             { type : 'attachments'     , className : 'surface-level-1', params : { id : 'request-attachments', editable : true, layout : 'tiles', singleToolbar : 'controls' } },
         ],
-        statesColors    : config.service.problemReports.stateColors,
+        statesColors    : config.problemReports.stateColors,
         layout          : 'dashboard',
         reload          : false,
         openInPLM       : applicationFeatures.openInPLM,
@@ -546,10 +568,10 @@ function openSelectedAssetService(elemClicked) {
 
     $.get('/plm/details', { link : links.service }, function(response) {
 
-        let linkAsset = getSectionFieldValue(response.data.sections, config.service.assetServices.fieldIDs.asset    , '', 'link');
-        let linkSNL   = getSectionFieldValue(response.data.sections, config.service.assetServices.fieldIDs.serialnrs, '', 'link');
+        let linkAsset = getSectionFieldValue(response.data.sections, config.assetServices.fieldIDs.asset    , '', 'link');
+        let linkSNL   = getSectionFieldValue(response.data.sections, config.assetServices.fieldIDs.serialnrs, '', 'link');
 
-        openSelectedProductOrAsset(linkAsset, 'asset', config.service.assets.fieldIDs, links.service, linkSNL);
+        openSelectedProductOrAsset(linkAsset, 'asset', config.assets.fieldIDs, links.service, linkSNL);
        
         insertItemSummary(links.service, {
             contents : [{
@@ -558,8 +580,8 @@ function openSelectedAssetService(elemClicked) {
                     id             : 'service-details', 
                     editable       : true,
                     hideHeader     : true,
-                    expandSections : config.service.assetServices.detailsPanel.expandSections,
-                    sectionsEx     : config.service.assetServices.detailsPanel.excludeSections
+                    expandSections : config.assetServices.detailsPanel.expandSections,
+                    sectionsEx     : config.assetServices.detailsPanel.excludeSections
                 }
             },{ 
                 type   : 'grid',
@@ -579,11 +601,11 @@ function openSelectedAssetService(elemClicked) {
                 }
             }],
             statesColors    : [
-                { label : 'New',         color : config.colors.red,    states : ['Received'] },
-                { label : 'In Work',     color : config.colors.yellow, states : ['Review', 'Quote Creation'] },
-                { label : 'Waiting',     color : config.colors.red,    states : ['Awaiting Response', 'Quote Submitted'] },
-                { label : 'Delivery',    color : config.colors.yellow, states : ['Order in process', 'Shipment'] },
-                { label : 'Completed',   color : config.colors.green,  states : ['Completed'] }
+                { label : 'New',         color : 'red',    states : ['Received'] },
+                { label : 'In Work',     color : 'yellow', states : ['Review', 'Quote Creation'] },
+                { label : 'Waiting',     color : 'red',    states : ['Awaiting Response', 'Quote Submitted'] },
+                { label : 'Delivery',    color : 'yellow', states : ['Order in process', 'Shipment'] },
+                { label : 'Completed',   color : 'green',  states : ['Completed'] }
             ],
             id              : 'service',
             hideCloseButton : true,
@@ -676,31 +698,40 @@ function openItem() {
 
     // if(isBlank(sections)) getInitialData(links.bom.split('/')[4]);
 
-    insertBOM(links.ebom, { 
-        bomViewName         : config.service.items.bomViewName, 
+    let paramsBOM = {
+        bomViewName         : config.items.bomViewName, 
         collapseContents    : true,
         contentSize         : 's',
-        fieldsIn            : [ 'Item' , 'Quantity', 'Qty' ],
         reset               : true, 
         path                : true, 
         hideDetails         : false, 
         quantity            : true,
         counters            : true,
-        getFlatBOM          : true, 
+        getFlatBOM          : false, 
+        includeBOMPartList  : true, 
         search              : true,
         showRestricted      : false,
         toggles             : true,
-        openInPLM           : config.service.applicationFeatures.openInPLM,
-        revisionBias        : config.service.items.bomRevisionBias,
-        endItem             : config.service.items.endItemFilter,
-        selectItems         : { fieldId : config.service.items.fieldIdSparePart, values : config.service.items.fieldValuesSparePart }
-    });
-    insertViewer(links.ebom);
+        openInPLM           : config.applicationFeatures.openInPLM,
+        revisionBias        : config.items.bomRevisionBias,
+        endItem             : config.items.endItemFilter,
+        selectItems         : { fieldId : config.items.fieldIdSparePart, values : config.items.fieldValuesSparePart }
+    }
+
+    let keys = Object.keys(config.paramsBOM);
+
+    if(isiPad) paramsBOM.singleToolbar = 'actions';
+
+    for(let key of keys) paramsBOM[key] = config.paramsBOM[key];
+
+    finishedLoading.engineeringBOM = false;
+    finishedLoading.serviceBOM     = false;
+
+    insertBOM          (links.ebom, paramsBOM);
+    insertViewer       (links.ebom);
     updateRelatedPanels(links.ebom);
 
-    console.log(links);
-
-    if(!isBlank(links.sbom)) insertServiceBOM();
+    if(!isBlank(links.sbom)) insertServiceBOM(); else finishedLoading.serviceBOM = true;
 
     if(isBlank(links.snl)) {
         
@@ -709,19 +740,16 @@ function openItem() {
     
     } else {
 
-        console.log(config.service.serialNumbers.fieldIDs.partNumber);
-        console.log(config.service.serialNumbers.fieldIDs.instanceId);
-
         $('body').removeClass('no-snl');
         $('#toggle-snl').removeClass('hidden');
         insertGrid(links.snl, { 
             id            : 'snl',
             headerLabel   : 'Serial Numbers',
             singleToolbar : 'controls',
-            fieldsIn      : config.service.serialNumbers.tableColumns,
+            fieldsIn      : config.serialNumbers.tableColumns,
             editable      : true,
-            groupBy       : config.service.serialNumbers.fieldIDs.partNumber,
-            sortBy        : config.service.serialNumbers.fieldIDs.instanceId,
+            groupBy       : config.serialNumbers.fieldIDs.partNumber,
+            sortBy        : config.serialNumbers.fieldIDs.instanceId,
             sortType      : 'integer',
             onClickItem   : function(elemClicked) { selectSerialNumber(elemClicked); }
         });
@@ -774,10 +802,10 @@ function updateRelatedPanels(link) {
 //             fields                          = responses[1].data;
 //             wsProblemReports.sections       = responses[2].data;
 //             wsProblemReports.fields         = responses[3].data;
-//             wsProblemReports.fieldIdImage   = config.service.problemReports.fieldIdImage;
+//             wsProblemReports.fieldIdImage   = config.problemReports.fieldIdImage;
 //             wsSparePartsRequests.sections   = responses[4].data;
 
-//             if(isBlank(config.service.problemReports.fieldIdImage)) {
+//             if(isBlank(config.problemReports.fieldIdImage)) {
 //                 wsProblemReports.fieldIdImage = getFirstImageFieldID(wsProblemReports.fields);
 //                 paramsProcesses.fieldIdMarkup = wsProblemReports.fieldIdImage;
 //                 if(applicationFeatures.manageProblemReports) insertChangeProcesses(link, paramsProcesses);
@@ -792,9 +820,12 @@ function updateRelatedPanels(link) {
 
 
 // Parse BOM for Spare Parts
-function changeBOMViewDone(id, settings, bom, selectedItems, flatBOM) {
+function changeBOMViewDone(id, settings, bom, selectedItems, flatBOM, additionalData, partList) {
 
     $('#bom-processing').hide();
+    bomPartList = partList;
+
+    finishedLoading.engineeringBOM = true;
 
     if(!isBlank(links.sbom)) {
         finishSparePartsList();
@@ -805,7 +836,7 @@ function changeBOMViewDone(id, settings, bom, selectedItems, flatBOM) {
 
     // let fields         = [];
     // let urnsSpareParts = [];
-    // let fieldIdImage   = config.service.items.fieldIdImage;
+    // let fieldIdImage   = config.items.fieldIdImage;
     let elemContent    = $('#items-content');
 
     // for(let bomView of settings.bomViews) {
@@ -826,19 +857,22 @@ function changeBOMViewDone(id, settings, bom, selectedItems, flatBOM) {
     //         case 'TITLE'                                      : urnsSpareParts.title        = urnField; break;
     //         case 'DESCRIPTION'                                : urnsSpareParts.description  = urnField; break;
     //         case fieldIdImage                                 : urnsSpareParts.image        = urnField; break;
-    //         case config.items.fieldIdNumber                   : urnsSpareParts.partNumber   = urnField; break;
-    //         case config.service.fieldId                       : urnsSpareParts.spareWearPart= urnField; break;
-    //         case config.service.items.sparePartTileDetails[0] : urnsSpareParts.material     = urnField; break;
-    //         case config.service.items.sparePartTileDetails[1] : urnsSpareParts.weight       = urnField; break;
-    //         case config.service.items.sparePartTileDetails[2] : urnsSpareParts.dimensions   = urnField; break;
+    //         case common.workspaces.items.fieldIdNumber                   : urnsSpareParts.partNumber   = urnField; break;
+    //         case config.fieldId                       : urnsSpareParts.spareWearPart= urnField; break;
+    //         case config.items.sparePartTileDetails[0] : urnsSpareParts.material     = urnField; break;
+    //         case config.items.sparePartTileDetails[1] : urnsSpareParts.weight       = urnField; break;
+    //         case config.items.sparePartTileDetails[2] : urnsSpareParts.dimensions   = urnField; break;
     //     }
 
     // }
     
     // insertBOMSpareParts(elemContent, selectedItems, urnsSpareParts, flatBOM);
+    
+    $('#items-processing').hide();
 
     for(let selectedItem of selectedItems) insertSparePart(elemContent, selectedItem, 'sparePart');
-    
+
+
     setSparePartStockStatus();
     insertNonSparePartMessage();
     finishSparePartsList();
@@ -1003,24 +1037,24 @@ function insertServiceBOM() {
 
     $.get('/plm/bom', params, function(response) {
 
-        let elemListGroup     = insertSparePartsGroup(elemContent, config.service.serviceBOMTypes.sparePart.groupLabel);
+        let elemListGroup     = insertSparePartsGroup(elemContent, config.serviceBOMTypes.sparePart.groupLabel);
         let elemListParts     = insertSparePartsList(elemContent);
-        let elemKitsGroup     = insertSparePartsGroup(elemContent, config.service.serviceBOMTypes.kit.groupLabel);
+        let elemKitsGroup     = insertSparePartsGroup(elemContent, config.serviceBOMTypes.kit.groupLabel);
         let elemKitsParts     = insertSparePartsList(elemContent);
-        let elemOfferingGroup = insertSparePartsGroup(elemContent, config.service.serviceBOMTypes.offering.groupLabel);
+        let elemOfferingGroup = insertSparePartsGroup(elemContent, config.serviceBOMTypes.offering.groupLabel);
         let elemOfferingParts = insertSparePartsList(elemContent);
         let elemComponents    = null;
         let type              = '';
 
         for(let bomPart of response.data.bomPartsList) {
 
-            if(bomPart.level === 1 && bomPart.details.TYPE === config.service.serviceBOMTypes.sparePart.fieldValue) { 
+            if(bomPart.level === 1 && bomPart.details.TYPE === config.serviceBOMTypes.sparePart.fieldValue) { 
                 type = 'sparePart'; 
-            } else if(bomPart.level === 1 && bomPart.details.TYPE === config.service.serviceBOMTypes.kit.fieldValue) { 
+            } else if(bomPart.level === 1 && bomPart.details.TYPE === config.serviceBOMTypes.kit.fieldValue) { 
                 type = 'kit'; 
                 let elemKit = insertSparePart(elemKitsParts, bomPart, 'kit');
                 elemComponents = insertSparePartComponents(elemKit);
-            } else if(bomPart.level === 1 && bomPart.details.TYPE === config.service.serviceBOMTypes.offering.fieldValue) { 
+            } else if(bomPart.level === 1 && bomPart.details.TYPE === config.serviceBOMTypes.offering.fieldValue) { 
                 type = 'offering'; 
                 let elemOffering = insertSparePart(elemOfferingParts, bomPart, 'offering');
                 elemComponents = insertSparePartComponents(elemOffering);
@@ -1038,6 +1072,10 @@ function insertServiceBOM() {
             }
 
         }
+
+        $('#items-processing').hide();
+
+        finishedLoading.serviceBOM = true;
 
         setSparePartStockStatus();
         insertNonSparePartMessage();
@@ -1086,6 +1124,7 @@ function insertSparePartComponents(elemPrevious) {
 
     let elemSparePartComponents = $('<div></div>').insertAfter(elemPrevious)
         .addClass('spare-part-components')
+        .addClass('no-scrollbar')
         .addClass('list')
         .addClass('tiles')
         .addClass('surface-level-2');
@@ -1129,8 +1168,6 @@ function insertSparePart(elemParent, bomPart, type) {
 
     listServiceItems.spareParts.push(bomPart.root);
 
-    let addToCart = (elemParent.attr('id') === 'cart-list');
-
     let elemSparePart = $('<div></div>').appendTo(elemParent)
         .addClass('tile')
         .addClass('spare-part')
@@ -1143,41 +1180,31 @@ function insertSparePart(elemParent, bomPart, type) {
         .click(function(e) {
             clickSparePart($(this));
         });
+
+    if(type === 'custom') elemSparePart.insertAfter($('#custom-message'));
                     
     let elemSparePartImage = $('<div></div>').appendTo(elemSparePart)
         .addClass('spare-part-image')
         .addClass('tile-image');
 
-    let elemSparePartIcon = $('<span></span>').appendTo(elemSparePartImage)
-            .addClass('icon')
-            .addClass('filled')
-            .addClass(config.service.serviceBOMTypes[type].icon);
-         
-    if(addToCart) {
-
-        if(!isBlank(bomPart.image)) {
-
-            elemSparePartIcon.remove();
-            $('<img>').attr('src', bomPart.image).appendTo(elemSparePartImage);
-
-        }
-
-    } else {
+    $('<span></span>').appendTo(elemSparePartImage)
+        .addClass('icon')
+        .addClass('filled')
+        .addClass(config.serviceBOMTypes[type].icon);
     
-        $.get('/plm/details', { link : bomPart.link }, function(response) {
-            let params = {
-                replace   : true,
-                icon      : config.service.serviceBOMTypes[type].icon,
-                imageLink : getFirstImageFieldValue(response.data.sections)
+    $.get('/plm/details', { link : bomPart.link }, function(response) {
+        let params = {
+            replace   : true,
+            icon      : config.serviceBOMTypes[type].icon,
+            imageLink : getFirstImageFieldValue(response.data.sections)
+        }
+        $('.spare-part').each(function() {
+            if($(this).attr('data-link') === response.params.link) {
+                let elemImage = $(this).find('.spare-part-image').first();
+                appendImageFromCache(elemImage, {}, params, function() {});
             }
-            $('.spare-part').each(function() {
-                if($(this).attr('data-link') === response.params.link) {
-                    let elemImage = $(this).find('.spare-part-image').first();
-                    appendImageFromCache(elemImage, {}, params, function() {});
-                }
-            });
         });
-    }
+    });
                 
     let elemSparePartDetails = $('<div></div>').appendTo(elemSparePart)
         .addClass('spare-part-details')
@@ -1193,94 +1220,41 @@ function insertSparePart(elemParent, bomPart, type) {
     $('<div></div>').appendTo(elemSparePartID)
         .addClass('spare-part-number')
         .addClass('tile-title')
-        .html(bomPart.partNumber);    
+        .html(bomPart.details[config.items.sparePartTileTitle]);    
 
     $('<div></div>').appendTo(elemSparePartDetails)
         .addClass('spare-part-title')
-        .html(bomPart.title);  
-
-    // $('<div></div>').appendTo(elemSparePartDetails)
-    //     .addClass('spare-part-material')
-    //     .addClass('with-icon')
-    //     .addClass('icon-product')
-    //     .addClass('filled');
-    //     // .html(getBOMNodeValue(selectedItem.node, urnsSpareParts.material));
-        
-    // let partSpec        = '';
-    // // let partWeight      = getBOMNodeValue(selectedItem.node, urnsSpareParts.weight);
-    // // let partDimensions  = getBOMNodeValue(selectedItem.node, urnsSpareParts.dimensions);
-            
-    // // if(partWeight !== '') {
-    // //     partSpec = partWeight;
-    // //     if(partWeight !== '') partSpec = partWeight + ' / ' + partDimensions;
-    // // } else partSpec = partDimensions
-
-    // $('<div></div>').appendTo(elemSparePartDetails)
-    //     .addClass('spare-part-dimensions')
-    //     .addClass('with-icon')
-    //     .addClass('icon-width')
-    //     .html(partSpec);
+        .html(bomPart.details[config.items.sparePartTileSubtitle]);  
 
     let elemSparePartSide = $('<div></div>').appendTo(elemSparePart)
         .addClass('spare-part-side');
 
+    let elemCartAdd = $('<div></div>').appendTo(elemSparePartSide)
+        .addClass('button')
+        .addClass('cart-add')
+        .click(function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            addCartItem($(this));
+        });  
+            
+    $('<div></div>').appendTo(elemCartAdd)
+        .addClass('icon')
+        .addClass('icon-cart-add');
 
-    if(addToCart) {
-
-        let elemCartQuantity = $('<div></div>').appendTo(elemSparePartSide)
-            .addClass('cart-quantity')
-            .click(function(e) {
-                e.preventDefault();
-                e.stopPropagation();
-            });
-
-        $('<div></div>').appendTo(elemCartQuantity)
-            .addClass('cart-quantity-label')
-            .html('Qty');
-
-        $('<input></input>').appendTo(elemCartQuantity)
-            .addClass('cart-quantity-input')
-            .val('1');
-
-        $('<div></div>').appendTo(elemSparePartSide)
-            .addClass('button')
-            .addClass('icon')
-            .addClass('icon-delete')
-            .addClass('cart-remove')
-            .click(function(e) {
-                e.preventDefault();
-                e.stopPropagation();
-                removeCartItem($(this));
-            });             
-
-    } else {
-
-        let elemCartAdd = $('<div></div>').appendTo(elemSparePartSide)
-            .addClass('button')
-            .addClass('cart-add')
-            .click(function(e) {
-                e.preventDefault();
-                e.stopPropagation();
-                addCartItem($(this));
-            });  
-                
-        $('<div></div>').appendTo(elemCartAdd)
-            .addClass('icon')
-            .addClass('icon-cart-add');
-
-        $('<div></div>').appendTo(elemCartAdd)
-            .html('Add to cart');
-
-    }
+    $('<div></div>').appendTo(elemCartAdd)
+        .html('Add to cart');
 
     if(applicationFeatures.showStock) {
         $('<div></div>').appendTo(elemSparePartSide).addClass('spare-part-stock');
     }
 
+    afterInsertSparePart(elemParent, bomPart, elemSparePart);
 
     return elemSparePart;
 
 }
+function afterInsertSparePart(elemParent, bomPart, elemSparePart) {}
 function insertNonSparePartMessage() {
 
     if(isBlank(applicationFeatures.enableCustomRequests)) return;
@@ -1301,58 +1275,47 @@ function insertNonSparePartMessage() {
         .addClass('button')
         .addClass('default')
         .html('Confirm')
-        .click(function(){
+        .click(function() {
+
+            let link = $('#custom-message').attr('data-link');
+
+            for(let bomPart of bomPartList) {
+
+                if(bomPart.link === link) {
+                    
+                    let elemSparePart = insertSparePart($('#items-content'), bomPart, 'custom');
+
+                    $('.bom-item').each(function() {
+                        if($(this).attr('data-link') === link) {
+                            $(this).addClass('is-spare-part').addClass('spare-part-custom');
+                            let elemCell = $(this).find('.bom-column-icon');
+                            $('<span></span>').appendTo(elemCell)
+                                .addClass('icon')
+                                .addClass(config.serviceBOMTypes.custom.icon)
+                                .addClass('filled')
+                                .attr('Custom spare part request');
+                        }
+                    });
+
+                    if(applicationFeatures.showStock) {
+
+                        let elemStock  = elemSparePart.find('.spare-part-stock');
+                        let stockLabel = 'No spare part';
+                        let stockClass = 'custom';
+            
+                        elemSparePart.addClass('spare-part-stock-' + stockClass);
+                        elemStock.attr('title', stockLabel);
+            
+                        $('<div></div>').appendTo(elemStock).addClass('spare-part-stock-icon');
+                        $('<div></div>').appendTo(elemStock).addClass('spare-part-stock-label').html(stockLabel);
+
+                    }
+
+                    break;
+                }
+            }
 
             $('#custom-message').hide();
-            // let link = $('#custom-message').attr('data-link');
-            let itemData = {
-                link          : $('#custom-message').attr('data-link'),
-                root          : $('#custom-message').attr('data-root'),
-                quantity      : 1,
-                totalQuantity : 1
-            };
-
-            $('.bom-item').each(function() {
-                if($(this).attr('data-link') === itemData.link) {
-                    itemData.urn = $(this).attr('data-urn');
-                    itemData.partNumber = $(this).attr('data-part-number');
-                    itemData.title = $(this).attr('data-title');
-                    $(this).addClass('is-spare-part').addClass('spare-part-custom');
-                    let elemCell = $(this).find('.bom-column-icon');
-                    $('<span></span>').appendTo(elemCell)
-                        .addClass('icon')
-                        .addClass(config.service.serviceBOMTypes.custom.icon)
-                        .addClass('filled')
-                        .attr('Custom spare part request');
-
-                }
-            });
-
-            // let elemSparePart = genTileSparePart(link, itemData.urn, itemData.partNumber, itemData.title, 1.0);
-            // let elemSparePart = genTileSparePart(link, itemData.partNumber, 1.0, itemData.title);
-
-            // let bomPart = {
-            //     link : link,
-
-            // }
-
-            let elemSparePart = insertSparePart($('#items-content'), itemData, 'custom');
-                elemSparePart.insertAfter($('#custom-message'));
-                elemSparePart.addClass('spare-part-custom');
-
-            if(applicationFeatures.showStock) {
-
-                let elemStock  = elemSparePart.find('.spare-part-stock');
-                let stockLabel = 'No spare part';
-                let stockClass = 'custom';
-        
-                elemSparePart.addClass('spare-part-stock-' + stockClass);
-                elemStock.attr('title', stockLabel);
-        
-                $('<div></div>').appendTo(elemStock).addClass('spare-part-stock-icon');
-                $('<div></div>').appendTo(elemStock).addClass('spare-part-stock-label').html(stockLabel);
-
-            }
 
         });
 
@@ -1567,7 +1530,8 @@ function setSparePartStockStatus() {
 }
 function finishSparePartsList() {
 
-    $('#items-processing').hide();
+    if(!finishedLoading.engineeringBOM) return;
+    if(!finishedLoading.serviceBOM    ) return;
 
     if($('#bom-thead-row').length === 0) return;
 
@@ -1586,7 +1550,7 @@ function finishSparePartsList() {
                 $(this).addClass('is-spare-part');
                 $('<span></span>').appendTo(elemCell)
                     .addClass('icon')
-                    .addClass(config.service.serviceBOMTypes.sparePart.icon)
+                    .addClass(config.serviceBOMTypes.sparePart.icon)
                     .addClass('filled')
                     .attr('title', 'Is Spare Part');
                 break;
@@ -1601,7 +1565,7 @@ function finishSparePartsList() {
                     $(this).addClass('is-spare-part');
                     $('<span></span>').appendTo(elemCell)
                         .addClass('icon')
-                        .addClass(config.service.serviceBOMTypes.kit.icon)
+                        .addClass(config.serviceBOMTypes.kit.icon)
                         .addClass('filled')
                         .attr('title', 'Contained in Kit');
                 }
@@ -1615,7 +1579,7 @@ function finishSparePartsList() {
                         $(this).addClass('is-spare-part');
                         $('<span></span>').appendTo(elemCell)
                             .addClass('icon')
-                            .addClass(config.service.serviceBOMTypes.offering.icong)
+                            .addClass(config.serviceBOMTypes.offering.icon)
                             .addClass('filled')
                             .attr('title', 'Included in offering');
                     }
@@ -1625,6 +1589,14 @@ function finishSparePartsList() {
         }
         
     });
+
+    onSparePartsListDone();
+
+}
+function onSparePartsListDone() {
+
+    // Use listServiceItems to access list of spare parts with defined properties
+    // Use CSS class spare-part to access all spare part DOM elements
 
 }
 
@@ -1741,7 +1713,7 @@ function unhideMatchingSpareParts(root) {
     });
     $('.spare-part-component').each(function() {
         if($(this).attr('data-root') === root) {
-            $(this).addClass('selected');
+            // $(this).addClass('selected');
             $(this).parent().removeClass('hidden');
             $(this).parent().prev().removeClass('hidden');
         }
@@ -1794,10 +1766,10 @@ function filterBySparePartsList() {
 }
 function highlightSparePartStocks() {
 
-    highlightSparePartStock('spare-part-stock-normal', config.vectors.green,  true );
-    highlightSparePartStock('spare-part-stock-low'   , config.vectors.yellow, false);
-    highlightSparePartStock('spare-part-stock-none'  , config.vectors.red,    false);
-    highlightSparePartStock('spare-part-stock-custom', config.vectors.blue,   false);
+    highlightSparePartStock('spare-part-stock-normal', colors.vectors.green,  true );
+    highlightSparePartStock('spare-part-stock-low'   , colors.vectors.yellow, false);
+    highlightSparePartStock('spare-part-stock-none'  , colors.vectors.red,    false);
+    highlightSparePartStock('spare-part-stock-custom', colors.vectors.blue,   false);
 
 }
 function highlightSparePartStock(className, vector, reset) {
@@ -1824,7 +1796,7 @@ function highlightSparePartStock(className, vector, reset) {
     });
 
     viewerSetColors(partNumbers, { 
-        color       : vector ,
+        color       : vector,
         resetColors : reset,
         isolate     : reset,
         unhide      : true
@@ -1880,7 +1852,7 @@ let gridRow  =  {
 
     let elemPanel  = elemClicked.closest('.panel-top');
     // let rowData    = getSerialNumberDetails(elemClicked, );
-    let fieldIDs = config.service.serialNumbers.fieldIDs;
+    let fieldIDs = config.serialNumbers.fieldIDs;
 
 elemClicked.children().each(function() {
 
@@ -2146,22 +2118,57 @@ function addCartItem(elemClicked) {
 
     if(elemSparePart.hasClass('has-components')) elemSparePart.next().addClass('in-cart');
 
-    let item = {
-        link          : elemSparePart.attr('data-link'),
-        root          : elemSparePart.attr('data-root'),
-        title         : elemSparePart.find('.spare-part-title').html(),
-        type          : elemSparePart.attr('data-type'),
-        image         : elemSparePart.find('img').attr('src'),
-        partNumber    : elemSparePart.attr('data-part-number'),
-        totalQuantity : elemSparePart.attr('data-qty'),
-    }
+    let elemCartItem = $('<div></div>').appendTo($('#cart-list'))
+        .addClass('tile')
+        .addClass('spare-part')
+        .attr('data-link', elemSparePart.attr('data-link'))
+        .attr('data-root', elemSparePart.attr('data-root'))
+        .attr('data-title', elemSparePart.attr('data-title'))
+        .attr('data-type', elemSparePart.attr('data-type'))
+        .attr('data-part-number', elemSparePart.attr('data-part-number'))
+        .attr('data-qty', elemSparePart.attr('data-qty'));
 
-    let elemItem = insertSparePart($('#cart-list'), item, item.type);
-    
-    if(applicationFeatures.showStock) {
-        elemItem.addClass('spare-part-stock-' + elemSparePart.attr('data-stock'));
-        let elemStock = elemItem.find('.spare-part-stock');
-        $('<div></div>').appendTo(elemStock).addClass('spare-part-stock-icon');
+    elemSparePart.find('.spare-part-image'  ).clone().appendTo(elemCartItem);
+    elemSparePart.find('.spare-part-details').clone().appendTo(elemCartItem);        
+      
+
+    let elemCartItemSide = $('<div></div>').appendTo(elemCartItem).addClass('spare-part-side'); 
+
+    let elemCartItemQuantity = $('<div></div>').appendTo(elemCartItemSide)
+        .addClass('cart-quantity')
+        .click(function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+        });
+
+    $('<div></div>').appendTo(elemCartItemQuantity)
+        .addClass('cart-quantity-label')
+        .html('Qty');
+
+    $('<input></input>').appendTo(elemCartItemQuantity)
+        .addClass('cart-quantity-input')
+        .val('1');
+
+    $('<div></div>').appendTo(elemCartItemSide)
+        .addClass('button')
+        .addClass('icon')
+        .addClass('icon-delete')
+        .addClass('cart-remove')
+        .click(function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            removeCartItem($(this));
+        }); 
+
+     if(applicationFeatures.showStock) {
+
+        elemSparePart.find('.spare-part-stock').clone().appendTo(elemCartItemSide); 
+
+        if(elemSparePart.hasClass('spare-part-stock-none'  )) elemCartItem.addClass('spare-part-stock-none'  );
+        if(elemSparePart.hasClass('spare-part-stock-low'   )) elemCartItem.addClass('spare-part-stock-low'   );
+        if(elemSparePart.hasClass('spare-part-stock-normal')) elemCartItem.addClass('spare-part-stock-normal');
+        if(elemSparePart.hasClass('spare-part-stock-custom')) elemCartItem.addClass('spare-part-stock-custom');
+
     }
 
     adjustCartHeight();
@@ -2193,7 +2200,7 @@ function adjustCartHeight() {
     let heightCart          = 38;
     let heightCartList      = 0;
     let maxHeight           = ($('#main').height() - 50) * 0.5;
-    let heightTiles         = 68;
+    let heightTiles         = 65;
     let isVisible           = elemCart.is(':visible');
 
     if(countPartsInCart === 0) {
@@ -2204,7 +2211,7 @@ function adjustCartHeight() {
 
         if(!isVisible) setTimeout(function() { elemCart.fadeIn(); }, 300);
 
-        topTabs = 100;
+        topTabs = (isiPad) ? 80 : 100;
 
     } else {
 
@@ -2218,7 +2225,7 @@ function adjustCartHeight() {
             heightCartList  = countPartsInCart * heightTiles;
         }
 
-        topTabs = heightCart + 70;
+        topTabs = heightCart + ((isiPad) ? 50 : 70);
 
     }
 

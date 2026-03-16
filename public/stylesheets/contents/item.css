@@ -641,6 +641,9 @@ td.field-editable > .picklist-controls > .picklist-input {
     white-space     : nowrap;
     width           : 100%;
 }
+.readonly > .picklist-selected-items > * > .picklist-selected-item-remove {
+    display : none;
+}
 .multi-picklist.readonly:has(.picklist-selected-item:nth-child(2)) {
     padding : 7px 0px 7px 0px;
 }
@@ -1242,9 +1245,11 @@ tr.content-item.selected > td {
 .content-item.selected > td {
     background : var(--color-selected-background);
 }
-.content-item:hover td {
+.content-item:hover td ,
+table.grid .content-item:hover td,
+table.bom-table .content-item:hover td {
     border-color     : var(--color-blue-500) !important;
-    background-color : var(--color-hover-background) !important;
+    background-color : var(--color-hover-background);
 }
 .bom-color {
     background  : transparent;
@@ -1289,7 +1294,9 @@ td.bom-first-col {
     font-weight : bold;
 }   
 .bom-descriptor {
-    padding : 0px;
+    padding       : 0px;
+    overflow      : hidden;
+    text-overflow : ellipsis;
 }
 .bom-actions {
     display : flex;
@@ -1880,7 +1887,7 @@ tr.list-item > td.changed > select {
 }
 
 
-/*  WORKFLOW */
+/*  WORKFLOW HISTORY */
 /* ----------------------------------------------------------------------------- */
 .workflow-history-content {
     flex-direction : column;
@@ -1946,6 +1953,58 @@ tr.list-item > td.changed > select {
 .panel-top.surface-level-3 > .panel-content > .workflow-history-event .workflow-history-action-icon::before { background : var(--color-surface-level-3); }
 .panel-top.surface-level-4 > .panel-content > .workflow-history-event .workflow-history-action-icon::before { background : var(--color-surface-level-4); }
 .panel-top.surface-level-5 > .panel-content > .workflow-history-event .workflow-history-action-icon::before { background : var(--color-surface-level-5); }
+
+
+/*  WORKFLOW ACTION */
+/* ----------------------------------------------------------------------------- */
+#dialog-workflow-action {
+    height : 512px;
+    width  : 480px;
+    top    : calc(50% - 260px);
+    left   : calc(50% - 240px);
+}
+#dialog-workflow-action.no-comment {
+    height : 352px;
+    top    : calc(50% - 170px);
+}
+#dialog-workflow-action.no-owner-notification {
+    height : 288px;    
+    top    : calc(50% - 140px);
+}
+#dialog-workflow-action.no-comment.no-owner-notification {
+    height : 360px;
+    top    : calc(50% - 160px);
+}
+#dialog-workflow-action-content {
+    display    : grid;
+    column-gap : 12px;
+    row-gap    : 2px;
+    grid-template-columns: 130px 1fr;
+}
+#dialog-workflow-action-content .label { 
+    font-weight : bold;
+    text-align  : right; 
+}
+#dialog-workflow-action-content .message { 
+    padding : 12px 18px; 
+}
+#dialog-workflow-action-comment-optional,
+#dialog-workflow-action-comment-required,
+#dialog-workflow-action-comment,
+#dialog-workflow-action-notify-owner {
+    grid-column : 1 / 3;
+}
+#dialog-workflow-action-comment {
+    background : var(--color-surface-level-2);
+    padding    : 12px 18px;
+    height     : 80px;
+}
+#dialog-workflow-action.no-comment #dialog-workflow-action-comment-optional,
+#dialog-workflow-action.no-comment #dialog-workflow-action-comment-required,
+#dialog-workflow-action.no-comment #dialog-workflow-action-comment { display : none; }
+#dialog-workflow-action.required-comment #dialog-workflow-action-comment-optional { display : none; }
+#dialog-workflow-action.optional-comment #dialog-workflow-action-comment-required { display : none; }
+#dialog-workflow-action.no-owner-notification #dialog-workflow-action-notify-owner  { display : none; }
 
 
 

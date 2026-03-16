@@ -211,7 +211,21 @@ function genPDMTileFileVersion(file, params) {
     params.imageFile    = file.file.id + '-' + file.version;
     params.details      = 'data';
 
-    return genSingleTile(params);
+    let elemTile  = genSingleTile(params);
+
+    if(isDrawingFile(file)) elemTile.addClass('drawing'); else elemTile.addClass('model');
+
+    $.get('/vault/image-cache', { link : file.url }, function(response) {
+        if(response.status === 200) {
+            let elemParent = elemTile.find('.tile-image');
+            $('<img>').attr('src', '../' + response.data.url).on('load', function() {
+                elemParent.html('');
+                elemParent.append($(this));
+            });
+        }
+    });
+
+    return elemTile;
 
 }
 function genPDMTileItemVersion(item, params) {
@@ -237,7 +251,7 @@ function genPDMTileItemVersion(item, params) {
         details     : 'data'
     }
 
-    return  genSingleTile(tileParams);
+    return genSingleTile(tileParams);
 
 }
 function genPDMTileChangeOrder(eco, params) {
@@ -249,6 +263,20 @@ function genPDMTileChangeOrder(eco, params) {
 
     return genSingleTile(params);
 
+}
+function isDrawingFile(file) {
+
+    let suffix = file.name.split('.').pop();
+
+    switch(suffix) {
+
+        case 'dwg':
+        case 'idw':
+            return true;
+
+    }
+
+    return false;
 }
 function insertEntityTypeIcon(elemTile) {
 
