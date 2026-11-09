@@ -3,12 +3,15 @@ let urlParameters       = {};
 let languageId          = '1';
 let username            = '';
 const isiPad            = ( navigator.userAgent.includes('iPad') || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1) );
-let isiPhone            = navigator.userAgent.match(/iPhone/i) != null;
+const isiPhone          = navigator.userAgent.match(/iPhone/i) != null;
+const isMobile          = (isiPad || isiPhone) ;
 let applicationFeatures = {}
+let dataContextMenu     = {}
 let viewerFeatures      = {};
 let responseCache       = [];
 let allWorkspaces       = [];
 let downloadQueue       = [];
+let lastTimer           = new Date();
 
 
 let settings = {}
@@ -20,9 +23,10 @@ $(document).ready(function() {
 
     urlParameters = getURLParameters();
           
-         if(theme.toLowerCase() ===  'dark') { $('body').addClass( 'dark-theme'); theme =  'dark'; }
-    else if(theme.toLowerCase() === 'black') { $('body').addClass('black-theme'); theme = 'black'; }
-    else                                     { $('body').addClass('light-theme'); theme = 'light'; }
+         if(theme.toLowerCase() ===   'dark') { $('body').addClass(  'dark-theme'); theme =   'dark'; }
+    else if(theme.toLowerCase() ===  'black') { $('body').addClass( 'black-theme'); theme =  'black'; }
+    else if(theme.toLowerCase() === 'fusion') { $('body').addClass('fusion-theme'); theme = 'fusion'; }
+    else                                      { $('body').addClass( 'light-theme'); theme =  'light'; }
 
     beforeApplicationStart();
     insertAvatar();  
@@ -32,7 +36,6 @@ $(document).ready(function() {
 
     $('#header-logo'    ).click(function() { reloadPage(true); });
     $('#header-title'   ).click(function() { reloadPage(false); });
-    $('#header-subtitle').click(function() { reloadPage(false); });
 
 });
 function beforeApplicationStart() {
@@ -89,7 +92,10 @@ function getSystemAdminSession(callback) {
         } else {
             $.get('/plm/login-admin', {}, function (response) {
                 if(response.error) {
-                    showErrorMessage('Login Error', 'Failed to login with system admin privileges. Please review your Admin Client ID and Admin Client Secret in the settings file.');
+                    showStartupError({
+                        title   : 'System Admin access required',
+                        details : 'Failed to login with system admin privileges. Please review the Admin Client ID and Admin Client Secret in your environments file.',
+                    });
                 } else {
                     $('#startup').fadeOut();
                     $('body').children().removeClass('hidden');
@@ -186,21 +192,25 @@ function getFeatureSettingsDone() {
 }
 
 
-// Retrieve configuration profile from application settings for defined workspace ID
-function getProfileSettings(appConfiguration, wsId) {
+// Get Vault ID
+function getVaultId(callback) {
 
-    let result = {};
+    showStartupDialog();
 
-    for(let appProfile of appConfiguration) {
+    $.get('/vault/id', function(response) {
 
-        if(wsId === appProfile.wsId.toString()) {
-            result = appProfile;
+        if(response.success) {
+            hideStartupDialog();
+            if(typeof callback !== 'undefined') callback();
+        } else {
+            showStartupError({
+                title        : 'No Vault Connection',
+                details      : 'Please forward this message to your administrator :<br/>' + response.message
+            });
         }
 
-    }
-
-    return result;
-
+    });
+    
 }
 
 
@@ -209,12 +219,18 @@ function showStartupDialog() {
 
     $('body').children().addClass('hidden');
 
-    $('<div></div>').appendTo('body')
-        .attr('id', 'startup')
-        .addClass(getSurfaceLevel($('body')));
+    let elemStartup = $('#startup');
 
-    $('<div></div>').appendTo($('#startup'))
-        .attr('id', 'startup-logo');
+    if(elemStartup.length === 0) {
+
+        $('<div></div>').appendTo('body')
+            .attr('id', 'startup')
+            .addClass(getSurfaceLevel($('body')));
+
+        $('<div></div>').appendTo($('#startup'))
+            .attr('id', 'startup-logo');
+
+    } 
 
 }
 function hideStartupDialog() {
@@ -243,16 +259,16 @@ function showStartupError(params) {
         .addClass('pos-abs-max')
         .addClass(getSurfaceLevel($('body')));
 
-    let elemWrapper = $('<div></div>').appendTo(elemParent).addClass('wrapper');
+    let elemWrapper = $('<div></div>').appendTo(elemParent).addClass('startup-error-wrapper');
 
-    let elemHeader = $('<div></div>').appendTo(elemWrapper).addClass('header');
-    $('<div></div>').appendTo(elemHeader).addClass('icon').addClass(icon);
-    $('<div></div>').appendTo(elemHeader).addClass('title').html(title);
+    let elemHeader = $('<div></div>').appendTo(elemWrapper).addClass('startup-error-header');
+    $('<div></div>').appendTo(elemHeader).addClass('startup-error-icon').addClass('icon').addClass(icon);
+    $('<div></div>').appendTo(elemHeader).addClass('startup-error-title').html(title);
     
-    $('<div></div>').appendTo(elemWrapper).addClass('details').html(details);
-    $('<div></div>').appendTo(elemWrapper).addClass('instructions').html(instructions);
+    $('<div></div>').appendTo(elemWrapper).addClass('startup-error-details').html(details);
+    $('<div></div>').appendTo(elemWrapper).addClass('startup-error-instructions').html(instructions);
     
-    let elemActions = $('<div></div>').appendTo(elemWrapper).addClass('actions')
+    let elemActions = $('<div></div>').appendTo(elemWrapper).addClass('startup-error-actions')
 
     $('<div></div>').appendTo(elemActions)
         .addClass('button')
@@ -333,8 +349,10 @@ function insertMenuContents(elemParent, id, isAdmin) {
 
     if(typeof isAdmin === 'undefined') isAdmin = true;
 
-    let elemColumns = $('<div></div>').appendTo(elemParent).attr('id', id)
-        .addClass('box-shadow');
+    let elemColumns = $('<div></div>').appendTo(elemParent).attr('id', id);
+    let idParent    = elemParent.attr('id');
+    
+    if(idParent === 'menu') elemColumns.addClass('box-shadow');
 
     for(let column of menu) {
 
@@ -449,6 +467,162 @@ function clickMenuCommand(elemCommand) {
     document.location.href = url;
 
 }
+function insertContextMenuEntries(link) {
+
+    let contextMenu  = [];
+    let workspaces   = dataContextMenu.workspaces;
+    let wsId         = Number(link.split('/')[4]);
+    let elemColumns  = $('#menu-columns')
+    let elemColumn   = $('#menu-context-actions');
+
+    if(elemColumn.length === 0) {
+        elemColumn = $('<div></div>').addClass('menu-context-actions').attr('id', 'menu-context-actions');
+    } else elemColumn.html('');
+
+    let elemCommands = $('<div></div>').addClass('menu-commands').appendTo(elemColumn);
+
+    $('<div></div>').addClass('menu-title').html('Context Actions').prependTo(elemColumn);
+
+    for(let button of dataContextMenu.buttons) {
+
+        let validWorkspaces = [];
+
+        for(let ws of button.workspaces) validWorkspaces.push(dataContextMenu.workspaces[ws]);
+
+        if(validWorkspaces.includes(wsId)) {
+            insertContextMenuCommand(elemCommands, button);
+        }
+
+    }
+
+    elemColumn.attr('data-wsid' , wsId);
+    elemColumn.attr('data-dmsid', (link.split('/')[6]));
+
+    if(elemCommands.children().length > 0) elemColumn.appendTo(elemColumns);
+
+}
+function insertContextMenuCommand(elemCommands, command) {
+
+    let elemCommand = $('<div></div>').appendTo(elemCommands)
+        .addClass('menu-command')
+        .addClass('menu-context-action')
+        .addClass('button')
+        .addClass('with-icon')
+        .addClass('icon-')
+        .attr('data-url', command.url)
+        .click(function(e) {
+            clickContxtMenuCommand($(this), false);
+        });
+
+    $('<div></div>').appendTo(elemCommand)
+        .addClass('menu-command-title')
+        .html(command.label);
+
+    $('<div></div>').appendTo(elemCommand)
+        .addClass('menu-command-popup')
+        .addClass('icon')
+        .addClass('icon-open')
+        .attr('title', 'Open in new tab')
+        .click(function (e) {
+            e.preventDefault();
+            e.stopPropagation();
+            clickContxtMenuCommand($(this), true);
+        });
+
+}
+function clickContxtMenuCommand(elemClicked, openInPopup) {
+
+    let elemCommand = elemClicked.closest('.menu-context-action');
+    let url         = elemCommand.attr('data-url');
+    let location    = document.location.href.split('?');
+    let newParams   = (url.indexOf('?') > -1) ? url.split('?')[1].split('&') : [];
+    let keepParams  = ['theme'];
+    let elemMenu    = $('#menu-context-actions');
+
+    if(location.length > 1) {
+        
+        let curParams = location[1].split('&');
+
+        for(let curParam of curParams) {
+
+            let curName = curParam.split('=')[0];
+            let add = keepParams.includes(curName);
+
+            for(let newParam of newParams) {
+
+                let newName = newParam.split('=')[0];
+
+                if(newName.toLowerCase() === curName.toLowerCase()) {
+                    add = false;
+                    break;
+                }
+
+            }
+
+            if(add) {
+                url += (url.indexOf('?') > 0) ? '&' : '?';
+                url += curParam;
+            }
+
+        }
+    }
+
+    url += '&wsId='  + elemMenu.attr('data-wsid');
+    url += '&dmsId=' + elemMenu.attr('data-dmsid');
+
+    if(openInPopup) {
+        window.open(url);
+        $('#menu').fadeOut(150);
+    } else {
+        showStartupDialog();
+        document.location.href = url;
+    }
+
+}
+function removeContextMenuEntries() {
+
+    $('#menu-context-actions').remove();
+
+}
+
+
+// Insert Subtitle Reference
+function insertHeaderSubtitleWithReference(headerSubtitle, title, link, prepend, separator) {
+
+    prepend   = prepend   || true;
+    separator = separator || '/';
+
+    let elemSubtitle  = $('#header-subtitle');
+    let elemSeparator = $('<span></span>').addClass('header-subtitle-separator').html(separator);
+
+    elemSubtitle.html(headerSubtitle);
+
+    if(title !== '') {
+
+        let elemReference = $('<span></span>')
+            .addClass('header-subtitle-reference')
+            .html(title);
+
+        if(prepend) {
+            elemReference.prependTo(elemSubtitle);
+            if(separator !== '') elemSeparator.insertAfter(elemReference);
+        } else {
+            elemReference.appendTo(elemSubtitle);
+            if(separator !== '') elemSeparator.insertBefore(elemReference);
+        }
+
+        if(link !== '') {
+            elemReference.attr('data-link', link)          
+                .click(function(e) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    openItemByLink($(this).attr('data-link'));
+                });    
+        }
+
+    }
+
+}
 
 
 // Cache Status Indicator Feature
@@ -534,6 +708,378 @@ function setCacheStatusIndicator(result) {
 }
 
 
+// Set user profile picture
+function insertAvatar() {
+
+    let elemAvatar = $('#header-avatar');
+
+    if(elemAvatar.length === 0) return;
+
+    $.get('/plm/me', { useCache : false }, function(response) {
+
+        userAccount.displayName  = response.data.displayName;
+        userAccount.email        = response.data.email;
+        userAccount.organization = response.data.organization;
+        userAccount.fullName     = response.data.fullName;
+        userAccount.userId       = response.data.userId;
+        userAccount.userNumber   = response.data.userNumber;
+
+        if(isBlank(response.data.image.large)) {
+
+            elemAvatar.addClass('icon').addClass('icon-user').addClass('filled');
+
+        } else {
+
+            elemAvatar.html('')
+                .addClass('no-icon')
+                .attr('title', response.data.displayName + ' @ ' + tenant)
+                .css('background', 'url(' + response.data.image.large + ')')
+                .css('background-position', 'center')
+                .css('background-size', elemAvatar.css('height'));
+
+        }
+
+        insertAvatarDone(response.data);
+
+    });
+
+}
+function insertAvatarDone(data) {}
+
+
+// Insert Rich Text Editor elements
+function insertRichTextEditor(elemParent, value, params, classNameOfChangedElement) {
+
+    if(isBlank(params)) {
+
+        params = {
+            styles : true,
+            font   : true,
+            links  : true,
+            insert : true,
+            color  : true,
+            back   : true,
+            indent : true,
+            table  : true
+        };
+
+    } else {
+
+        if(isBlank(params.styles)) params.styles = true;
+        if(isBlank(params.font  )) params.font   = true;
+        if(isBlank(params.links )) params.links  = true;
+        if(isBlank(params.insert)) params.insert = true;
+        if(isBlank(params.color )) params.color  = true;
+        if(isBlank(params.back  )) params.back   = true;
+        if(isBlank(params.indent)) params.indent = true;
+        if(isBlank(params.table )) params.table  = true;
+
+    }
+
+    let elemInput = $('<div></div>').appendTo(elemParent)
+        .html(value)
+        .addClass('rte-input')
+        .attr('data-class-name-changed-element', classNameOfChangedElement)
+        .attr('contenteditable', true);
+
+
+    let elemToolbar = $('<div></div>').appendTo(elemParent).addClass('rte-toolbar');
+
+    if(params.styles) {
+
+        let elemStyles = $('<select></select>').appendTo(elemToolbar)
+            .addClass('button')
+            .on('change', function() {
+                setRTEFormat($(this), 'formatBlock', $(this).val());
+            });        
+
+        $('<option></option>').appendTo(elemStyles).attr('value', 'h1').html('Heading 1');
+        $('<option></option>').appendTo(elemStyles).attr('value', 'h2').html('Heading 2');
+        $('<option></option>').appendTo(elemStyles).attr('value', 'h3').html('Heading 3');
+        $('<option></option>').appendTo(elemStyles).attr('value', 'h4').html('Heading 4');
+        $('<option></option>').appendTo(elemStyles).attr('value', 'p').html('Paragraph');
+
+    }
+
+    if(params.font) {
+
+        insertRichTextEditorButton(elemToolbar, 'icon-bold'          , 'Bold'         , 'bold');
+        insertRichTextEditorButton(elemToolbar, 'icon-underline'     , 'Underline'    , 'underline');
+        insertRichTextEditorButton(elemToolbar, 'icon-strike-through', 'Strikethrough', 'strikeThrough');
+        insertRichTextEditorButton(elemToolbar, 'icon-remove-format' , 'Remove Format', 'removeFormat');
+
+    }
+
+    if(params.links) {
+
+        $('<div></div>').appendTo(elemToolbar)
+            .addClass('button')
+            .addClass('icon')
+            .addClass('icon-link')
+            .attr('title', 'Paste Link')
+            .click(function() {
+                let clipboard = navigator.clipboard.readText();
+                clipboard.then(function(link) {
+                    setRTEFormat($(this), 'createLink', link);
+                });
+            });
+
+        insertRichTextEditorButton(elemToolbar, 'icon-disconnect'     , 'Remove Link'    , 'unlink');
+
+    }
+
+    if(params.insert) {
+
+        insertRichTextEditorButton(elemToolbar, 'icon-list'           , 'Insert Bulleted List'  , 'insertUnorderedList');
+        insertRichTextEditorButton(elemToolbar, 'icon-bom'            , 'Insert Numbered List'  , 'insertOrderedList');
+        insertRichTextEditorButton(elemToolbar, 'icon-horizontal-rule', 'Insert Horizontal Rule', 'insertHorizontalRule');
+
+    }
+
+    if(params.color) {
+
+        insertRichTextEditorButtonColor(elemToolbar, '#ee4400');
+        insertRichTextEditorButtonColor(elemToolbar, '#ffa600');
+        insertRichTextEditorButtonColor(elemToolbar, '#8fc844');
+        insertRichTextEditorButtonColor(elemToolbar, '#0696d7');
+
+        elemToolbar.children().last().addClass('last');
+
+    }
+
+    if(params.back) {
+
+        insertRichTextEditorButtonBackground(elemToolbar, '#ee4400');
+        insertRichTextEditorButtonBackground(elemToolbar, '#ffa600');
+        insertRichTextEditorButtonBackground(elemToolbar, '#8fc844');
+        insertRichTextEditorButtonBackground(elemToolbar, '#0696d7');  
+        
+        elemToolbar.children().last().addClass('last');
+
+    }
+
+    if(params.indent) {
+
+        insertRichTextEditorButton(elemToolbar, 'icon-indent' , 'Indent' , 'indent' );
+        insertRichTextEditorButton(elemToolbar, 'icon-outdent', 'Outdent', 'outdent');
+
+    }
+
+    if(params.table) {
+
+        insertRichTextEditorButtonTable(elemToolbar, 'icon-table-alt', 'Insert Table').click(function() {
+            
+            let table = '<table><tbody>';
+            for (let row = 0; row < 3; row += 1) {
+                table += '<tr>';
+                for (let column = 0; column < 3; column += 1) {
+                    table += `<td>&nbsp;</td>`;
+                }
+                table += '</tr>';
+            }
+            table += '</tbody></table><p><br></p>';
+            setRTEFormat($(this), 'insertHTML', table);
+
+        });
+
+        insertRichTextEditorButtonTable(elemToolbar, 'icon-add-left', 'Add Column Left').click(function() {
+            
+            let activeCell = getRichtTextEditorActiveTableCell();
+            let index      = activeCell.index();
+            let elemTable  = activeCell.closest('table');
+
+            elemTable.find('tr').each(function() {
+
+                let elemRow = $(this);
+                let elemCell = $('<td></td>').html('&nbsp;');
+                let elemRef = elemRow.children().eq(index);
+
+                elemCell.insertBefore(elemRef);
+
+            });
+
+        });
+
+        insertRichTextEditorButtonTable(elemToolbar, 'icon-add-right', 'Add Column Right').click(function() {
+            
+            let activeCell = getRichtTextEditorActiveTableCell();
+            let index      = activeCell.index();
+            let elemTable  = activeCell.closest('table');
+
+            elemTable.find('tr').each(function() {
+
+                let elemRow = $(this);
+                let elemCell = $('<td></td>').html('&nbsp;');
+                let elemRef = elemRow.children().eq(index);
+
+                elemCell.insertAfter(elemRef);
+
+            });
+
+        });
+
+        insertRichTextEditorButtonTable(elemToolbar, 'icon-add-above', 'Add Row Above').click(function() {
+            
+            let activeCell = getRichtTextEditorActiveTableCell();
+            let elemCur   = activeCell.closest('tr');
+            let elemNew   = elemCur.clone();
+
+            elemNew.find('td').each(function() { $(this).html('&nbsp;'); });
+            elemNew.insertBefore(elemCur);
+
+        });
+
+        insertRichTextEditorButtonTable(elemToolbar, 'icon-add-below', 'Add Row Below').click(function() {
+            
+            let activeCell = getRichtTextEditorActiveTableCell();
+            let elemCur   = activeCell.closest('tr');
+            let elemNew   = elemCur.clone();
+
+            elemNew.find('td').each(function() { $(this).html('&nbsp;'); });
+            elemNew.insertAfter(elemCur);
+
+        });
+
+        insertRichTextEditorButtonTable(elemToolbar, 'icon-delete-row', 'Delete Row').click(function() {
+            
+            let activeCell = getRichtTextEditorActiveTableCell();
+            let elemRow   = activeCell.closest('tr');
+
+            elemRow.remove();
+
+        });
+
+        insertRichTextEditorButtonTable(elemToolbar, 'icon-delete-column', 'Delete Column').click(function() {
+            
+            let activeCell = getRichtTextEditorActiveTableCell();
+            let index      = activeCell.index();
+            let elemTable  = activeCell.closest('table');
+
+            elemTable.find('tr').each(function() {
+                $(this).children().eq(index).remove();
+            });
+
+        });
+
+        insertRichTextEditorButtonTable(elemToolbar, 'icon-delete-selection', 'Delete Table').click(function() {
+            
+            let activeCell = getRichtTextEditorActiveTableCell();
+            let elemTable  = activeCell.closest('table');
+
+            elemTable.remove();
+
+        });
+
+    }
+
+    return elemInput;
+
+}
+function insertRichTextEditorButton(elemToolbar, icon, title, command) {
+
+    $('<div></div>').appendTo(elemToolbar)
+        .addClass('button')
+        .addClass('icon')
+        .addClass(icon)
+        .attr('title', title)
+        .click(function() {
+            setRTEFormat($(this), command, null);
+        });
+
+}
+function insertRichTextEditorButtonColor(elemToolbar, color) {
+
+    $('<div></div>').appendTo(elemToolbar)
+        .addClass('button')
+        .addClass('color')
+        .css('color', color)
+        .attr('title', 'Select text color')
+        .html('A')
+        .click(function() {
+            setRTEFormat($(this), 'foreColor', color);
+        });
+
+}
+function insertRichTextEditorButtonBackground(elemToolbar, color) {
+
+    let elemText = $('<div>A</div>').css('background', color)
+
+    $('<div></div>').appendTo(elemToolbar)
+        .addClass('button')
+        .addClass('background')
+        .attr('title', 'Select background color')
+        .append(elemText)
+        .click(function() {
+            setRTEFormat($(this), 'backColor', color);
+        });
+
+}
+function insertRichTextEditorButtonTable(elemToolbar, icon, title) {
+
+    let elemButton = $('<div></div>').appendTo(elemToolbar)
+        .addClass('button')
+        .addClass('icon')
+        .addClass(icon)
+        .attr('title', title);
+
+    return elemButton;
+
+}
+function setRTEFormat(elemClicked, format, value) {
+
+    let elemInput = elemClicked.parent().siblings('.rte-input');
+    let className = elemInput.attr('data-class-name-changed-element');
+
+    elemInput.focus();
+
+    if(format !== null) document.execCommand(format, false, value || null);
+
+    if(!isBlank(className)) {
+        let elemChanged = elemInput.closest('.' + className);
+        if(elemChanged.length > 0) elemChanged.addClass('changed');
+    }
+
+}
+function getRichtTextEditorActiveTableCell() {
+
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0) return null;
+
+    let node = selection.anchorNode;
+    if (node && node.nodeType === Node.TEXT_NODE) node = node.parentElement;
+
+    let result = node ? node.closest('td, th') : null;
+
+    return $(result);
+
+}
+
+
+// Validate required inputs
+function hasRequiredInput(elemInput, text) {
+
+    if(elemInput.length === 0) return false;
+
+    elemInput.siblings('.missing-text').remove();
+
+    if(elemInput.val() === '') {
+
+        elemInput.addClass('missing-input');
+
+        let elemText = $('<div></div>').insertAfter(elemInput)
+            .addClass('missing-text')    
+            .html(text);
+
+        return false;
+
+    } else {
+
+        elemInput.removeClass('missing');
+        return true;
+
+    }
+
+}
 
 
 // Reset current page
@@ -615,6 +1161,33 @@ function updateURLParameter(url, parameter, value, updateLocation) {
 }
 
 
+// Update value of defined URL parameter
+function updateURLLink(link, updateLocation) {
+
+    updateLocation = updateLocation || true;
+
+    let url       = document.location.href;
+    let parsedUrl = new URL(url);
+
+    if(!isBlank(link)) {
+
+        parsedUrl.searchParams.set( 'wsid', link.split('/')[4]);
+        parsedUrl.searchParams.set('dmsid', link.split('/')[6]);
+
+    } else {
+
+        parsedUrl.searchParams.delete( 'wsid');
+        parsedUrl.searchParams.delete('dmsid');
+
+    }
+
+    if(updateLocation) window.history.replaceState(null, null, parsedUrl.toString()); 
+
+    return parsedUrl.toString();
+
+}
+
+
 // Validate if given variable is null or empty
 function isBlank(value) {
 
@@ -643,49 +1216,100 @@ function sortArray(array, key, type, direction) {
 
     array.sort(function(a, b){
 
-        var valueA=a[key], valueB=b[key];
+        let valueA = a[key], valueB = b[key];
+        let result = 0;
 
         switch(type.toLowerCase()) {
 
             case 'string':
                 valueA = a[key].toLowerCase();
                 valueB = b[key].toLowerCase();
+                if (valueA < valueB) result = -1;
+                else if (valueA > valueB) result = 1;                
                 break;
             
             case 'number':
                 valueA = Number(valueA);
                 valueB = Number(valueB);
+                result = valueA - valueB;
                 break;
 
             case 'float':
                 valueA = parseFloat(valueA);
                 valueB = parseFloat(valueB);
+                result = valueA - valueB;
                 break;
 
+            case 'level':
+                result = sortTreeLevels(valueA, valueB);
+                break;                
 
         }
-        if(direction == 'ascending') {
 
-            // var valueA=a[key].toLowerCase(), valueB=b[key].toLowerCase()
-            if (valueA < valueB) //sort string ascending
-                return -1 
-            if (valueA > valueB)
-                return 1
-            return 0 //default return value (no sorting)
-
-        } else {
-
-            if (valueA > valueB) //sort string ascending
-                return -1 
-            if (valueA < valueB)
-                return 1
-            return 0 //default return value (no sorting)
-
-        }
+        return (direction === 'ascending') ? result : -result;
 
     });
 
 }
+function sortTreeLevels(a, b) {
+
+    let partsA = String(a).split('.').map(Number);
+    let partsB = String(b).split('.').map(Number);
+    let len    = Math.max(partsA.length, partsB.length);
+
+    for (var i = 0; i < len; i++) {
+        let numA = partsA[i] || 0;
+        let numB = partsB[i] || 0;
+        if (numA !== numB) return numA - numB;
+    }
+
+    return 0;
+
+}
+
+
+// Compare any value (numeric, string, alphanumeric)
+function compareValues(a, b) {
+
+    // returns  1 if a > b
+    // returns  0 if a = b
+    // returns -1 if a < b
+
+    return String(a).localeCompare(String(b), undefined, { numeric: true, sensitivity: 'base' });
+    
+}
+
+
+// Validate if string is JSON
+function isJSON(str) {
+    try {
+        return (JSON.parse(str) && !!str);
+    } catch (e) {
+        return false;
+    }
+}
+
+
+// Sort JSON by key names
+function sortJSON(obj) {
+
+    if (Array.isArray(obj)) {
+        return obj.map(sortJSON);
+    }
+
+    if (obj !== null && typeof obj === "object") {
+        return Object.keys(obj)
+            .sort()
+            .reduce((result, key) => {
+                result[key] = sortJSON(obj[key]);
+                return result;
+            }, {});
+    }
+
+    return obj;
+
+}
+
 
 
 // Get date from string property value
@@ -705,6 +1329,25 @@ function getDayOfYear(date = new Date()) {
     const diff  = date - start;
     
     return Math.floor(diff / (1000 * 60 * 60 * 24)) + 1;
+
+}
+
+
+// Format file size to convenient format
+function formatFileSize(bytes) {
+
+    if (bytes < 1024) return `${bytes} B`;
+
+    const units = ['KB', 'MB', 'GB', 'TB'];
+    let size    = bytes / 1024;
+    let unit    = units[0];
+
+    for (let i = 1; size >= 1024 && i < units.length; i++) {
+        size /= 1024;
+        unit = units[i];
+    }
+
+    return `${size.toFixed(size < 10 ? 1 : 0)} ${unit}`;
 
 }
 
@@ -740,6 +1383,8 @@ function appendProcessing(id, hidden) {
     $('<div></div>').addClass('bounce1').appendTo(elemProcessing);
     $('<div></div>').addClass('bounce2').appendTo(elemProcessing);
     $('<div></div>').addClass('bounce3').appendTo(elemProcessing);
+
+    return elemProcessing;
 
 }
 function appendViewerProcessing(id, hidden) {
@@ -983,7 +1628,7 @@ function hideStartupDialog() {
 // Browse responses for matching response and manage related cache
 function getResponseFromResponses(responses, url, link, useCache) {
 
-    if(isBlank(useCache)) useCache = false;
+    useCache = useCache || false;
 
     for(let response of responses) {
         if(('/plm' + response.url).indexOf(url) === 0) {
@@ -1061,6 +1706,23 @@ function getResponseFromCache(url, link) {
     }
 
     return null;
+
+}
+
+
+// Print current time to console
+function printTimer(label) {
+
+    let prefix = label || '';
+    let now    = new Date();
+    let diff   = now.getTime() - lastTimer;
+    let time   = now.toTimeString().split(' ')[0];
+
+    if(prefix !== '') prefix += ' - ';
+
+    console.log(prefix + time + ' + ' + (diff/1000) );
+
+    lastTimer = now.getTime();
 
 }
 
@@ -1152,44 +1814,6 @@ function getMatchingContentSurfaceLevels(parentLevel) {
     return result;
 
 }
-
-
-// Set user profile picture
-function insertAvatar() {
-
-    let elemAvatar = $('#header-avatar');
-
-    if(elemAvatar.length === 0) return;
-
-    $.get('/plm/me', { useCache : false }, function(response) {
-
-        userAccount.displayName  = response.data.displayName;
-        userAccount.email        = response.data.email;
-        userAccount.organization = response.data.organization;
-        userAccount.fullName     = response.data.fullName;
-        userAccount.userNumber   = response.data.userNumber;
-
-        if(isBlank(response.data.image.large)) {
-
-            elemAvatar.addClass('icon').addClass('icon-user').addClass('filled');
-
-        } else {
-
-            elemAvatar.html('')
-                .addClass('no-icon')
-                .attr('title', response.data.displayName + ' @ ' + tenant)
-                .css('background', 'url(' + response.data.image.large + ')')
-                .css('background-position', 'center')
-                .css('background-size', elemAvatar.css('height'));
-
-        }
-
-        insertAvatarDone(response.data);
-
-    });
-
-}
-function insertAvatarDone(data) {}
 
 
 // Panel Header collapse / expand
@@ -1436,150 +2060,34 @@ function insertCalendarMonth(id, currentDate) {
 }
 
 
-// Generate default settings object for item based and navigation views using genPanel*
-function getPanelSettings(link, params, defaults, additional) {
+// --- Registry-driven panel initialization -------------------------------------------------
+// Generate and return panel elements
+function genPanelElements(id) {
 
-    if(isBlank(defaults.additionalData)       ) defaults.additionalData        = [];
-    if(isBlank(defaults.collapsePanel)        ) defaults.collapsePanel         = false;
-    if(isBlank(defaults.collapseContents)     ) defaults.collapseContents      = false;
-    if(isBlank(defaults.contentSize)          ) defaults.contentSize           = 'm';
-    if(isBlank(defaults.contentSizes)         ) defaults.contentSizes          = [];
-    if(isBlank(defaults.counters)             ) defaults.counters              = false;
-    if(isBlank(defaults.createButtonIcon)     ) defaults.createButtonIcon      = 'icon-create';
-    if(isBlank(defaults.createButtonLabel)    ) defaults.createButtonLabel     = 'Create';
-    if(isBlank(defaults.disconnectButtonIcon) ) defaults.disconnectButtonIcon  = 'icon-list-remove';
-    if(isBlank(defaults.disconnectButtonLabel)) defaults.disconnectButtonLabel = 'Remove Selected';
-    if(isBlank(defaults.editable)             ) defaults.editable              = false;
-    if(isBlank(defaults.fieldsEx)             ) defaults.fieldsEx              = [];
-    if(isBlank(defaults.fieldsIn)             ) defaults.fieldsIn              = [];
-    if(isBlank(defaults.filterBySelection)    ) defaults.filterBySelection     = false;
-    if(isBlank(defaults.groupBy)              ) defaults.groupBy               = '';
-    if(isBlank(defaults.groupLayout)          ) defaults.groupLayout           = 'column';
-    if(isBlank(defaults.hideButtonLabels)     ) defaults.hideButtonLabels      = false;
-    if(isBlank(defaults.hideHeader)           ) defaults.hideHeader            = false;
-    if(isBlank(defaults.hideHeaderControls)   ) defaults.hideHeaderControls    = false;
-    if(isBlank(defaults.hideHeaderLabel)      ) defaults.hideHeaderLabel       = false;
-    if(isBlank(defaults.hidePanel)            ) defaults.hidePanel             = false;
-    if(isBlank(defaults.headerLabel)          ) defaults.headerLabel           = '';
-    if(isBlank(defaults.headerSubLabel)       ) defaults.headerSubLabel        = '';
-    if(isBlank(defaults.headerTopLabel)       ) defaults.headerTopLabel        = '';
-    if(isBlank(defaults.layout)               ) defaults.layout                = 'list';
-    if(isBlank(defaults.multiSelect)          ) defaults.multiSelect           = false;
-    if(isBlank(defaults.number)               ) defaults.number                = true;
-    if(isBlank(defaults.openInPLM)            ) defaults.openInPLM             = false;
-    if(isBlank(defaults.openOnDblClick)       ) defaults.openOnDblClick        = false;
-    if(isBlank(defaults.pagination)           ) defaults.pagination            = true;
-    if(isBlank(defaults.placeholder)          ) defaults.placeholder           = 'Search';
-    if(isBlank(defaults.reload)               ) defaults.reload                = false;
-    if(isBlank(defaults.reset)                ) defaults.reset                 = false;
-    if(isBlank(defaults.search)               ) defaults.search                = false;
-    if(isBlank(defaults.showInDialog)         ) defaults.showInDialog          = false;
-    if(isBlank(defaults.singleToolbar)        ) defaults.singleToolbar         = '';
-    if(isBlank(defaults.stateColors)          ) defaults.stateColors           = [];
-    if(isBlank(defaults.tableColumnsLimit)    ) defaults.tableColumnsLimit     = 100;
-    if(isBlank(defaults.tableRanges)          ) defaults.tableRanges           = false;
-    if(isBlank(defaults.tableTotals)          ) defaults.tableTotals           = false;
-    if(isBlank(defaults.textNoData)           ) defaults.textNoData            = 'No Entries';
-    if(isBlank(defaults.tileDetails)          ) defaults.tileDetails           = [];
-    if(isBlank(defaults.tileIcon)             ) defaults.tileIcon              = 'icon-product';
-    if(isBlank(defaults.tileImage)            ) defaults.tileImage             = false;
-    if(isBlank(defaults.tileSubtitle)         ) defaults.tileSubtitle          = 'WF_CURRENT_STATE';
-    if(isBlank(defaults.tileTitle)            ) defaults.tileTitle             = 'DESCRIPTOR';
-    if(isBlank(defaults.useCache)             ) defaults.useCache              = false;
-    if(isBlank(defaults.afterCompletion)      ) defaults.afterCompletion       = function (id) {};
-    if(isBlank(defaults.afterSave)            ) defaults.afterSave             = function (id) {};
+    genPanelTop                    (id);
+    genPanelHeader                 (id);
+    genPanelOpenSelectedInPLMButton(id);
+    genPanelBookmarkButton         (id);
+    genPanelWorkflowActions        (id);
+    genPanelOpenInPLMButton        (id);
+    genPanelSelectionControls      (id);
+    genPanelFilterToggleEmpty      (id);    
 
-    if(!isBlank(params.contentSizes)) params.contentSize = params.contentSizes[0];
-
-    let panelSettings = {
-        link                  : link,
-        additionalData        : isBlank(params.additionalData)        ? defaults.additionalData : params.additionalData,
-        collapsePanel         : isBlank(params.collapsePanel)         ? defaults.collapsePanel : params.collapsePanel,
-        collapseContents      : isBlank(params.collapseContents)      ? defaults.collapseContents : params.collapseContents,
-        compactDisplay        : isBlank(params.compactDisplay)        ? false : params.compactDisplay,
-        contentSize           : isBlank(params.contentSize)           ? defaults.contentSize : params.contentSize,
-        contentSizes          : isBlank(params.contentSizes)          ? defaults.contentSizes : params.contentSizes,
-        counters              : isBlank(params.counters)              ? defaults.counters : params.counters,
-        createButtonIcon      : isBlank(params.createButtonIcon)      ? defaults.createButtonIcon : params.createButtonIcon,
-        createButtonLabel     : isBlank(params.createButtonLabel)     ? defaults.createButtonLabel : params.createButtonLabel,
-        disconnectButtonIcon  : isBlank(params.disconnectButtonIcon)  ? defaults.disconnectButtonIcon : params.disconnectButtonIcon,
-        disconnectButtonLabel : isBlank(params.disconnectButtonLabel) ? defaults.disconnectButtonLabel : params.disconnectButtonLabel,
-        editable              : isBlank(params.editable)              ? defaults.editable : params.editable,
-        fieldsEx              : isBlank(params.fieldsEx)              ? defaults.fieldsEx : params.fieldsEx,
-        fieldsIn              : isBlank(params.fieldsIn)              ? defaults.fieldsIn : params.fieldsIn,
-        filterBySelection     : isBlank(params.filterBySelection)     ? defaults.filterBySelection : params.filterBySelection,
-        groupBy               : isBlank(params.groupBy)               ? defaults.groupBy : params.groupBy,
-        groupLayout           : isBlank(params.groupLayout)           ? defaults.groupLayout : params.groupLayout,
-        hideButtonLabels      : isBlank(params.hideButtonLabels)      ? defaults.hideButtonLabels : params.hideButtonLabels,
-        hideHeader            : isBlank(params.hideHeader)            ? defaults.hideHeader : params.hideHeader,
-        hideHeaderLabel       : isBlank(params.hideHeaderLabel)       ? defaults.hideHeaderLabel : params.hideHeaderLabel,
-        hideHeaderControls    : isBlank(params.hideHeaderControls)    ? defaults.hideHeaderControls : params.hideHeaderControls,
-        hidePanel             : isBlank(params.hidePanel)             ? defaults.hidePanel : params.hidePanel,
-        headerLabel           : isBlank(params.headerLabel)           ? defaults.headerLabel : params.headerLabel,
-        headerSubLabel        : isBlank(params.headerSubLabel)        ? defaults.headerSubLabel : params.headerSubLabel,
-        headerToggle          : isBlank(params.headerToggle)          ? false : params.headerToggle,
-        headerTopLabel        : isBlank(params.headerTopLabel)        ? defaults.headerTopLabel : params.headerTopLabel,
-        layout                : isBlank(params.layout)                ? defaults.layout : params.layout,
-        multiSelect           : isBlank(params.multiSelect)           ? defaults.multiSelect : params.multiSelect,
-        number                : isBlank(params.number)                ? defaults.number : params.number,
-        openInPLM             : isBlank(params.openInPLM)             ? defaults.openInPLM : params.openInPLM,
-        openOnDblClick        : isBlank(params.openOnDblClick)        ? defaults.openOnDblClick : params.openOnDblClick,
-        pagination            : isBlank(params.pagination)            ? defaults.pagination : params.pagination,
-        placeholder           : isBlank(params.placeholder)           ? defaults.placeholder : params.placeholder,
-        reload                : isBlank(params.reload)                ? defaults.reload : params.reload,
-        reset                 : isBlank(params.reset)                 ? defaults.reset : params.reset,
-        search                : isBlank(params.search)                ? defaults.search : params.search,
-        showInDialog          : isBlank(params.showInDialog)          ? defaults.showInDialog : params.showInDialog,
-        singleToolbar         : isBlank(params.singleToolbar)         ? defaults.singleToolbar : params.singleToolbar,
-        stateColors           : isBlank(params.stateColors)           ? defaults.stateColors : params.stateColors,
-        tileDetails           : isBlank(params.tileDetails)           ? defaults.tileDetails : params.tileDetails,
-        tileIcon              : isBlank(params.tileIcon)              ? defaults.tileIcon  : params.tileIcon,
-        tileImage             : isBlank(params.tileImage)             ? defaults.tileImage : params.tileImage,
-        tileImageFieldId      : isBlank(params.tileImage)             ? '' : params.tileImage,
-        tileSubtitle          : isBlank(params.tileSubtitle)          ? defaults.tileSubtitle : params.tileSubtitle,
-        tileTitle             : isBlank(params.tileTitle)             ? defaults.tileTitle : params.tileTitle,
-        tableColumnsLimit     : isBlank(params.tableColumnsLimit)     ? defaults.tableColumnsLimit : params.tableColumnsLimit,
-        tableHeaders          : isBlank(params.tableHeaders)          ? true : params.tableHeaders,
-        tableRanges           : isBlank(params.tableRanges)           ? defaults.tableRanges : params.tableRanges,
-        tableTotals           : isBlank(params.tableTotals)           ? defaults.tableTotals : params.tableTotals,
-        textNoData            : isBlank(params.textNoData)            ? defaults.textNoData : params.textNoData,
-        useCache              : isBlank(params.useCache)              ? defaults.useCache : params.useCache,
-        workspacesIn          : isBlank(params.workspacesIn)          ? [] : params.workspacesIn,
-        workspacesEx          : isBlank(params.workspacesEx)          ? [] : params.workspacesEx,
-        onClickItem           : isBlank(params.onClickItem)           ? null : params.onClickItem,
-        onDblClickItem        : isBlank(params.onDblClickItem)        ? null : params.onDblClickItem,
-        afterCompletion       : isBlank(params.afterCompletion)       ? defaults.afterCompletion : params.afterCompletion,
-        afterSave             : isBlank(params.afterSave)             ? defaults.afterSave : params.afterSave,
-        createWorkspaceIds    : [],
-        columns               : [],
-        isReload              : false,
-        sharedCache           : config.sharedCache || ''
+    for(let filter of settings[id].panelFilters)  {
+        if(filter[0] == 'toggle') genPanelFilterToggle (id, filter[1], filter[2], filter[3]);
+        else                      genPanelFilterSelect (id, filter[1], filter[2], filter[3]);
     }
 
-    if(panelSettings.collapsePanel) panelSettings.headerToggle = true;
+    delete settings[id].panelFilters;
 
-    if(!isBlank(additional)) {
-        for(let entry of additional) {
-
-            let key   = entry[0];
-            let value = entry[1];
-
-            panelSettings[key] = isEmpty(params[key]) ? value : params[key]
-    
-        }
-    }
-
-    if(debugMode) console.log(panelSettings);
-
-    panelSettings.mode = 'initial';
-
-    return panelSettings;
+    genPanelResizeButton      (id);
+    genPanelReloadButton      (id);
+    genPanelSearchInput       (id);
+    genPanelContents          (id);
+    genPanelPaginationControls(id);
 
 }
-
-
-// Generate and return panel elements
-function genPanelTop(id, className) {
+function genPanelTop(id) {
 
     let elemTop = $('#' + id);
 
@@ -1590,8 +2098,10 @@ function genPanelTop(id, className) {
 
     } else {
 
-        elemTop.addClass(className)
+        elemTop.addClass(settings[id].panelClassName)
             .addClass('panel-top')
+            .removeClass('item')
+            .removeClass('with-tabs')
             .html('')
             .show();
 
@@ -1600,16 +2110,18 @@ function genPanelTop(id, className) {
     if(elemTop.hasClass('dialog')) settings[id].showInDialog = true;
 
     if(settings[id].showInDialog  ) { elemTop.addClass('surface-level-1').addClass('dialog'); appendOverlay(false); }
-    if(settings[id].compactDisplay) { elemTop.addClass('compact'); }
     if(settings[id].counters      ) { elemTop.addClass('with-panel-counters'); }
     if(settings[id].multiSelect   ) { elemTop.addClass('multi-select'); }
-    if(settings[id].hidePanel     ) { elemTop.addClass('hidden'); }
+    if(settings[id].hidePanel     ) { elemTop.addClass('hidden'); } 
     if(settings[id].hideHeader    ) { elemTop.addClass('no-header'); }
+    if(settings[id].surfaceLevel  ) { elemTop.addClass('surface-level-' + settings[id].surfaceLevel); }
 
     if(!isBlank(settings[id].link)) elemTop.attr('data-link', settings[id].link);
 
     settings[id].elemTop = elemTop;
-    elemTop.removeClass('with-files-download');
+    
+    elemTop.removeClass('with-files-download')
+           .removeClass('with-files-download-preview')
 
     return elemTop;
 
@@ -1620,6 +2132,8 @@ function genPanelToolbar(id, name) {
         suffix = suffix.toLowerCase();
 
     let elemToolbar = $('#' + id + '-' + suffix);
+
+    elemToolbar.hide();
 
     if(elemToolbar.length > 0) return elemToolbar;
 
@@ -1702,7 +2216,7 @@ function genPanelHeader(id) {
 
     elemHeader.addClass(classNameTitle);
 
-    if(settings[id].hideHeaderLabel) $('#' + id).addClass('no-header-title');
+    if(settings[id].hideHeaderLabel) $('#' + id).addClass('no-header-title'); else $('#' + id).removeClass('no-header-title');
 
     genPanelHeaderCloseButton(id);
 
@@ -1743,6 +2257,7 @@ function genPanelBookmarkButton(id) {
 
         elemButtonBookmark = $('<div></div>').prependTo(elemToolbar)
             .attr('id', id + '-bookmark')
+            .attr('title', 'Click to add/remove this item from your bookmarks')
             .addClass('disabled')
             .addClass('button')
             .addClass('icon')
@@ -1835,6 +2350,7 @@ function genPanelOpenInPLMButton(id,) {
 
     elemButtonOpenInPLM = $('<div></div>').prependTo(elemToolbar)
         .attr('id', id + '-open')
+        .attr('title', 'Opens a new tab with this item in standard PLM user interface')
         .addClass('button')
         .addClass('icon')
         .addClass('icon-open')
@@ -1849,11 +2365,12 @@ function genPanelOpenInPLMButton(id,) {
 }
 function genPanelOpenSelectedInPLMButton(id) {
 
-    if(!settings[id].openInPLM) return;
+    if(!settings[id].openSelectedInPLM) return;
 
     let elemToolbar = genPanelToolbar(id, 'controls');
 
     let elemButtonOpenSelectedInPLM = $('<div></div>').appendTo(elemToolbar)
+        .attr('id', id + '-open-selected')
         .addClass('button')
         .addClass('icon')
         .addClass('icon-open')
@@ -1912,20 +2429,20 @@ function genPanelSelectionControls(id) {
 
         if(settings[id].filterBySelection) {
 
-        $('<div></div>').appendTo(elemToolbar)
-            .addClass('button')
-            .addClass('icon')
-            .addClass('icon-filter-selected')
-            .addClass('xs')
-            .addClass('multi-select-action')
-            .attr('id', id + '-filter-selected-only')
-            .attr('title', 'Display selected items only')
-            .click(function(e) {
-                e.preventDefault();
-                e.stopPropagation();
-                $(this).toggleClass('enabled');
-                filterPanelContent(id);
-            });
+            $('<div></div>').appendTo(elemToolbar)
+                .addClass('button')
+                .addClass('icon')
+                .addClass('icon-filter-selected')
+                .addClass('xs')
+                .addClass('multi-select-action')
+                .attr('id', id + '-filter-selected-only')
+                .attr('title', 'Display selected items only')
+                .click(function(e) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    $(this).toggleClass('enabled');
+                    filterPanelContent(id);
+                });
 
         }
     }
@@ -1937,7 +2454,7 @@ function genPanelToggleButtons(id, callbackExpand, callbackCollapse) {
 
     let elemToolbar = genPanelToolbar(id, 'controls');
 
-    $('<div></div>').appendTo(elemToolbar)
+    $('<div></div>').prependTo(elemToolbar)
         .addClass('button')
         .addClass('icon')
         .addClass('xs')
@@ -1950,7 +2467,7 @@ function genPanelToggleButtons(id, callbackExpand, callbackCollapse) {
             callbackExpand($(this));
         });
 
-    $('<div></div>').appendTo(elemToolbar)
+    $('<div></div>').prependTo(elemToolbar)
         .addClass('button')
         .addClass('icon')
         .addClass('xs')
@@ -2023,8 +2540,8 @@ function genPanelFilterToggle(id, property, suffix, label) {
     let elemToggle =  $('<div></div>').appendTo(elemToolbar)
         .hide()    
         .addClass('button')
-        .addClass('with-icon')
-        .addClass('icon-toggle-off')
+        .addClass('with-toggle')
+        .addClass('toggle-off')
         .addClass(id + '-filter-toggle')
         .html(label)
         .attr('id', id + '-filter-'+ suffix)
@@ -2033,7 +2550,7 @@ function genPanelFilterToggle(id, property, suffix, label) {
         .click(function(e) {
             e.preventDefault();
             e.stopPropagation();
-            $(this).toggleClass('icon-toggle-off').toggleClass('icon-toggle-on').toggleClass('filled');
+            $(this).toggleClass('toggle-off').toggleClass('toggle-on');
             filterPanelContent(id);
         });
 
@@ -2048,15 +2565,15 @@ function genPanelFilterToggleEmpty(id) {
 
     let elemToggle = $('<div></div>').appendTo(elemToolbar)
         .addClass('button')
-        .addClass('with-icon')
-        .addClass('icon-toggle-off')
+        .addClass('with-toggle')
+        .addClass('toggle-off')
         .html('Empty Cell')
         .attr('title', 'Focus on rows having empty inputs')
         .attr('id', id + '-filter-empty-only')
         .click(function(e) {
             e.preventDefault();
             e.stopPropagation();
-            $(this).toggleClass('icon-toggle-off').toggleClass('icon-toggle-on').toggleClass('filled');
+             $(this).toggleClass('toggle-off').toggleClass('toggle-on');
             filterPanelContent(id);
         });
 
@@ -2065,12 +2582,17 @@ function genPanelFilterToggleEmpty(id) {
 }
 function genPanelSearchInput(id) {
 
+    if(!settings[id].search) return;
+
     let elemToolbar = genPanelToolbar(id, 'controls');
 
     let elemSearch = $('<div></div>').appendTo(elemToolbar)
         .addClass('button')
         .addClass('panel-search')
-        .attr('id', id + '-search');
+        .attr('id', id + '-search')
+        .click(function() {
+            $(this).children('.panel-search-input').focus();
+        });
 
     $('<div></div>').appendTo(elemSearch)
         .addClass('button')
@@ -2137,6 +2659,7 @@ function genPanelSearchInput(id) {
         .addClass('button')
         .addClass('icon')
         .addClass('icon-cancel')
+        .addClass('filled')
         .addClass('hidden')
         .attr('id', id + '-filter-clear').click(function(e) {
             e.preventDefault();
@@ -2286,23 +2809,26 @@ function genPanelCreateButton(id, callback) {
             e.preventDefault();
             e.stopPropagation();
 
+            if($(this).hasClass('disabled')) return;
+
             insertCreate(settings[id].createWorkspaceNames, settings[id].createWorkspaceIds, {
-                id                  : settings[id].createId,
-                headerLabel         : settings[id].createHeaderLabel,
-                hideSections        : settings[id].createHideSections,
-                sectionsIn          : settings[id].createSectionsIn,
-                sectionsEx          : settings[id].createSectionsEx,
-                fieldsIn            : settings[id].createFieldsIn,
-                fieldsEx            : settings[id].createFieldsEx,
-                contextId           : id,
-                contextItem         : settings[id].link,
-                contextItems        : settings[id].createContextItems,
-                contextItemField    : settings[id].createContextItemField,
-                contextItemFields   : settings[id].createContextItemFields,
-                viewerImageFields   : settings[id].createViewerImageFields,
-                toggles             : settings[id].createToggles,
-                useCache            : settings[id].useCache,
-                afterCreation       : function(createId, createLink, data, contextId) { callback(createId, createLink, data, contextId); }
+                id                      : settings[id].createId,
+                headerLabel             : settings[id].createHeaderLabel,
+                hideSections            : settings[id].createHideSections,
+                sectionsIn              : settings[id].createSectionsIn,
+                sectionsEx              : settings[id].createSectionsEx,
+                fieldsIn                : settings[id].createFieldsIn,
+                fieldsEx                : settings[id].createFieldsEx,
+                contextPanelId          : id,
+                createContextItem       : settings[id].link,
+                createContextItemField  : settings[id].createContextItemField,
+                createContextItemFields : settings[id].createContextItemFields,
+                createContextItems      : settings[id].createContextItems,
+                createContextItemsField : settings[id].createContextItemsField,
+                createViewerImageFields : settings[id].createViewerImageFields,
+                toggles                 : settings[id].createToggles,
+                useCache                : settings[id].useCache,
+                afterCreation           : function(createId, createLink, data, contextId) { callback(createId, createLink, data, contextId); }
             });
             
         });
@@ -2322,7 +2848,6 @@ function genPanelDisconnectButton(id, callback) {
 
     let elemButtonDisconnect = $('<div></div>').appendTo(elemToolbar)
         .addClass('button')
-        .addClass('with-icon')
         .addClass('panel-action-remove')
         .addClass(settings[id].disconnectButtonIcon)
         .addClass('xs')
@@ -2330,12 +2855,18 @@ function genPanelDisconnectButton(id, callback) {
         .addClass('multi-select-action')
         .attr('id', id + '-action-disconnect')
         .attr('title', 'Removes the selected elements from the view. The given items will remain in the database.')
-        .html(settings[id].disconnectButtonLabel)
         .click(function(e) {
             e.preventDefault();
             e.stopPropagation();
             callback($(this));
         });
+
+    if(settings[id].disconnectButtonLabel === '') {
+        elemButtonDisconnect.addClass('icon');
+    } else {
+        elemButtonDisconnect.html(settings[id].disconnectButtonLabel);
+        elemButtonDisconnect.addClass('with-icon');
+    }
 
     return elemButtonDisconnect;
 
@@ -2423,6 +2954,7 @@ function genPanelContentItem(panelSettings, params) {
         link        : params.link,
         edge        : params.edge,
         partNumber  : params.partNumber,
+        revision    : '',
         imageId     : '',
         imageLink   : '',
         imageFile   : '',
@@ -2615,16 +3147,16 @@ function startPanelContentUpdate(id, mode) {
 
     if(elemToggles.length > 0) {
         elemToggles.each(function() { 
-            $(this).removeClass('icon-toggle-on')
+            $(this).removeClass('toggle-on')
                 .removeClass('filled')
-                .addClass('icon-toggle-off')
+                .addClass('toggle-off')
                 .hide();
         })
     }
 
     if(elemFilterSelected.length > 0) elemFilterSelected.removeClass('toggle-on').addClass('toggle-off');
 
-    if(elemFilterEmpty.length > 0) elemFilterEmpty.removeClass('icon-toggle-on').addClass('icon-toggle-off').removeClass('filled');
+    if(elemFilterEmpty.length > 0) elemFilterEmpty.removeClass('toggle-on').addClass('toggle-off').removeClass('filled');
 
     if(elemCounters.length > 0) elemCounters.children().each(function() {
         $(this).html('').removeClass('not-empty');
@@ -2632,7 +3164,9 @@ function startPanelContentUpdate(id, mode) {
 
     $('#' + id).find('.single-select-action').hide();
     $('#' + id).find('.multi-select-action').hide();
-    $('#' + id + '-actions').children('.panel-action').hide();
+    $('#' + id + '-controls').hide();
+    $('#' + id + '-actions').hide();
+    $('#' + id + '-footer').hide();
     $('#' + id + '-action-create').show().addClass('disabled');
     $('#' + id + '-content').html('').hide();
     
@@ -2716,7 +3250,7 @@ function setPanelCloneStatus(id, responses) {
 }
 function includePanelTableColumn (fieldId, fieldName, panelSettings, counter) {
 
-    if(panelSettings.tableColumnsLimit > counter) {
+    if(Number(panelSettings.tableColumnsLimit) > counter) {
         if((panelSettings.fieldsIn.length === 0) || ( panelSettings.fieldsIn.includes(fieldId)) || ( panelSettings.fieldsIn.includes(fieldName))) {
             if((panelSettings.fieldsEx.length === 0) || ((!panelSettings.fieldsEx.includes(fieldId)) && (!panelSettings.fieldsEx.includes(fieldName)))) {
                 return true;
@@ -2806,8 +3340,9 @@ function setPanelContentActions(id) {
         }
     }
 
+    
     Promise.all(requests).then(function(responses) {
-
+        
         if(responses.length > 0) settings[id].relatedPermissions = responses;
 
         if(settings[id].createWorkspaceIds.length === 0) {
@@ -2860,6 +3395,7 @@ function finishPanelContentUpdate(id, items, linkNew, data) {
                 case 'table': genTable(id, items); break;
                 case 'list' : genTiles(id, items); break;
                 case 'grid' : genTiles(id, items); break;
+                default     : genTiles(id, items); break;
             }
         }
     }
@@ -2870,6 +3406,9 @@ function finishPanelContentUpdate(id, items, linkNew, data) {
 
     if(elemContent.find('.content-item').length > 0) {
         elemContent.show();
+        $('#' + id + '-controls').show();
+        $('#' + id + '-actions').show();
+        $('#' + id + '-footer').show();
     } else {
         elemContent.hide();
         $('#' + id + '-no-data').show();
@@ -2879,6 +3418,7 @@ function finishPanelContentUpdate(id, items, linkNew, data) {
 
     if(settings[id].counters) updatePanelCalculations(id);
     if(!isBlank(settings[id].afterCompletion)) settings[id].afterCompletion(id, data);
+    unhideAllPanelToolbars(id);
 
 }
 function highlightNewPanelContent(id, linkNew) {
@@ -2912,6 +3452,13 @@ function setPanelPaginationControls(id, total) {
     }
 
 }
+function unhideAllPanelToolbars(id) {
+
+    $('#' + id + '-controls').show();
+    $('#' + id + '-actions' ).show();
+    $('#' + id + '-footer'  ).show();
+
+}
 
 
 
@@ -2920,8 +3467,8 @@ function filterPanelContent(id) {
 
     let elemSearchInput   = $('#' + id + '-search-input');
     let elemSearchActions = $('#' + id + '-search-actions');
+    let searchInputValue  = (elemSearchInput.length === 0) ? '' : elemSearchInput.val().toUpperCase();
     let searchMode        = elemSearchInput.siblings('.icon.default').attr('data-mode');
-    let searchInputValue  = elemSearchInput.val().toUpperCase();
     let elemTop           = $('#' + id);
     let elemContent       = $('#' + id + '-content');
     let elemNoData        = $('#' + id + '-no-data');
@@ -2938,7 +3485,7 @@ function filterPanelContent(id) {
 
     toggleFilters.each(function() {
         let elemToggle = $(this);
-        if(elemToggle.hasClass('icon-toggle-on')) {
+        if(elemToggle.hasClass('toggle-on')) {
             filters.push({
                 key   : elemToggle.attr('data-key'),
                 value : elemToggle.attr('data-value')
@@ -2970,7 +3517,7 @@ function filterPanelContent(id) {
     }
 
     if(toggleEmpty.length > 0) {
-        if(toggleEmpty.hasClass('icon-toggle-on')) {
+        if(toggleEmpty.hasClass('toggle-on')) {
             filterEmpty     = true;
             clearAllFilters = false;
         }
@@ -3292,7 +3839,7 @@ function panelSelectAll(id, elemClicked) {
     togglePanelToolbarActions(id);
 
     if(elemTop.hasClass('tree')) {
-        updateTreePath(elemClicked);
+        treeUpdatePath(elemClicked);
         selectInViewer(id);
     }
 
@@ -3316,7 +3863,7 @@ function panelDeselectAll(id, elemClicked) {
     togglePanelToolbarActions(id);
 
     if(elemTop.hasClass('tree')) {
-        updateTreePath(elemClicked);
+        treeUpdatePath(elemClicked);
         selectInViewer(id);
     }
 
@@ -3552,6 +4099,8 @@ function genTree(id, items) {
 
     elemContent.closest('.panel-top').addClass('tree');
 
+    if(settings[id].hideTreeColumns) $('#' + id).addClass('tree-columns-hidden');
+
     genTreeHeaders(id, elemTHead);
     genTreeRows(id, elemTBody, items);
     genTreePath(id);
@@ -3589,8 +4138,8 @@ function genTreeHeaders(id, elemTHead) {
 }
 function genTreeRows(id, elemTBody, items) {   
 
-    if(isBlank(settings[id].skipRootItem)) settings[id].skipRootItem = true;
-    if(isBlank(settings[id].hideNumber  )) settings[id].hideNumber =  true;
+    if(isBlank(settings[id].skipRootItem  )) settings[id].skipRootItem = true;
+    if(isBlank(settings[id].hideTreeNumber)) settings[id].hideTreeNumber =  true;
 
     let index = (settings[id].skipRootItem) ? 1 : 0;
 
@@ -3598,61 +4147,218 @@ function genTreeRows(id, elemTBody, items) {
 
         let item = items[index];
 
-        let elemRow = $('<tr></tr>').appendTo(elemTBody)
-            .attr('data-part-number', item.partNumber)
-            .attr('data-link'       , item.link)
-            .attr('data-title'      , item.title)
-            .attr('data-title'      , item.title)
-            .attr('data-level'      , item.level)
-            .addClass('level-' + item.level)
-            .addClass('content-item')
-            .click(function (e) {
-                clickContentItem(e, $(this));
-            }).dblclick(function(e) {
-                e.preventDefault();
-                e.stopPropagation();
-                if(!isBlank(settings[id].onDblClickItem)) settings[id].onDblClickItem($(this));
-                else if(settings[id].openOnDblClick) openItemByLink($(this).attr('data-link'));
+        let elemRow = genTreeRow(id, item); 
+            elemRow.appendTo(elemTBody);
+
+        // let elemRow = $('<tr></tr>').appendTo(elemTBody)
+        //     .attr('data-part-number', item.partNumber)
+        //     .attr('data-link'       , item.link)
+        //     .attr('data-title'      , item.title)
+        //     .attr('data-title'      , item.title)
+        //     .attr('data-level'      , item.level)
+        //     .addClass('level-' + item.level)
+        //     .addClass('content-item')
+        //     .click(function (e) {
+        //         clickContentItem(e, $(this));
+        //     }).dblclick(function(e) {
+        //         e.preventDefault();
+        //         e.stopPropagation();
+        //         if(!isBlank(settings[id].onDblClickItem)) settings[id].onDblClickItem($(this));
+        //         else if(settings[id].openOnDblClick) openItemByLink($(this).attr('data-link'));
+        //     });
+
+
+        // if(!isBlank(item.domProperties)) {
+        //     for(domProperty of item.domProperties) {
+        //         elemRow.attr('data-' + domProperty.key, domProperty.value);
+        //     }
+        // }
+
+        // if(settings[id].multiSelect) {
+
+        //     $('<td></td>').appendTo(elemRow)
+        //         .html('<div class="icon icon-check-box xxs"></div>')
+        //         .addClass('content-item-check-box')
+        //         .click(function(e) {
+        //             clickContentItemCheckbox(e, $(this));
+        //         });
+    
+        // }        
+
+        // $('<td></td>').appendTo(elemRow).addClass('tree-color');
+
+        // let elemFirstCol = $('<td></td>').appendTo(elemRow).addClass('tree-first-col');
+
+        // if(item.hasChildren) {
+        //     $('<span></span>').appendTo(elemFirstCol).addClass('tree-nav').addClass('icon');
+        //     elemRow.addClass('node');
+        // } else elemRow.addClass('leaf');
+
+        // if(!settings[id].hideTreeNumber) $('<span></span>').appendTo(elemFirstCol).addClass('tree-number');
+
+        // $('<span></span>').appendTo(elemFirstCol).addClass('tree-title').html(item.title);
+
+    }
+
+}
+function genTreeRow(id, item) {
+
+    let elemRow = $('<tr></tr>')
+        .attr('data-part-number', item.partNumber)
+        .attr('data-link'       , item.link)
+        .attr('data-title'      , item.title)
+        .attr('data-title'      , item.title)
+        .attr('data-level'      , item.level)
+        .addClass('level-' + item.level)
+        .addClass('content-item')
+        .addClass('tree-item')
+        .click(function (e) {
+            clickContentItem(e, $(this));
+        }).dblclick(function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            if(!isBlank(settings[id].onDblClickItem)) settings[id].onDblClickItem($(this));
+            else if(settings[id].openOnDblClick) openItemByLink($(this).attr('data-link'));
+        });
+
+
+    if(!isBlank(item.domProperties)) {
+        for(domProperty of item.domProperties) {
+            elemRow.attr('data-' + domProperty.key, domProperty.value);
+        }
+    }
+
+    if(settings[id].multiSelect) {
+
+        $('<td></td>').appendTo(elemRow)
+            .html('<div class="icon icon-check-box xxs"></div>')
+            .addClass('content-item-check-box')
+            .click(function(e) {
+                clickContentItemCheckbox(e, $(this));
             });
 
+    }        
 
-        if(!isBlank(item.domProperties)) {
-            for(domProperty of item.domProperties) {
-                elemRow.attr('data-' + domProperty.key, domProperty.value);
+    if(settings[id].dragable) {
+
+        elemRow.attr('draggable'  , 'true');
+        elemRow.attr('ondragstart', settings[id].onDragStart);
+        elemRow.attr('ondragend'  , settings[id].onDragEnd  );
+
+    }
+
+    if(settings[id].dropable) {
+
+        elemRow.attr('ondragenter', settings[id].onDragEnter);
+        elemRow.attr('ondragover' , settings[id].onDragOver );
+        elemRow.attr('ondragleave', settings[id].onDragLeave);
+        elemRow.attr('ondrop'     , settings[id].onDrop     );
+
+    }
+
+
+    $('<td></td>').appendTo(elemRow).addClass('tree-color');
+
+    let elemFirstCol = $('<td></td>').appendTo(elemRow).addClass('tree-first-col');
+
+    if(item.hasChildren) {
+        elemRow.addClass('node');
+        $('<span></span>').appendTo(elemFirstCol)
+        .addClass('tree-nav')
+        .addClass('icon')
+        .click(function(e) {
+            clickTreeToggle(e, $(this))
+        });
+    } else {
+        elemRow.addClass('leaf');
+    }
+
+    if(!settings[id].hideTreeNumber) {
+        let elemTreeNumber = $('<span></span>').appendTo(elemFirstCol).addClass('tree-number');
+        if(typeof item.number !== 'undefined') elemTreeNumber.html(item.level + '.' + item.number);
+    }
+
+    if(!settings[id].hideDescriptor  ) $('<span></span>').appendTo(elemFirstCol).addClass('tree-descriptor').html(item.title);
+    if( settings[id].treeShowQuantity) $('<span></span>').appendTo(elemRow).addClass('tree-quantity').html(bomQuantity);
+
+    if(settings[id].editable) {
+        console.log('999');
+        // elemFirstCol.children('.tree-descriptor').attr('contenteditable', true);
+        // elemFirstCol.children('.tree-quantity').attr('contenteditable', true);
+
+    }
+
+    if(settings[id].treeShowRestricted) {
+        $('<td></td>').appendTo(elemRow)
+            .addClass('tree-icon')
+            .addClass('tree-column-locks');
+    }
+
+    genTreeRowCells(id, item, elemRow, elemFirstCol);
+
+    // $('<span></span>').appendTo(elemFirstCol).addClass('tree-title').html(item.title);
+
+    return elemRow;
+
+}
+function genTreeRowCells(id, item, elemRow, elemFirstCol) {
+
+    let index = 0;
+
+    item.details = item.details || [];
+
+    for(let column of settings[id].columns) {
+
+        if(column.included) {
+
+            let value      = item.details[column.fieldId];
+            let elemCell   = $('<td></td>');
+            let isEditable = false;
+
+            if(column.hasOwnProperty('editability')) {
+                if(column.editability === 'ALWAYS') {
+                    isEditable = true;
+                }
             }
+
+            if(!settings[id].hideDescriptor || (index > 0)) {
+                elemCell.appendTo(elemRow);
+            } else {
+                elemCell = $('<span></span>').appendTo(elemFirstCol).addClass('bom-descriptor');
+            }
+
+            if(settings[id].editable && isEditable) {
+
+                if(column.type.title === 'Radio Button') {
+                    column.type.title = 'Single Selection';
+                }
+
+                // column.id = column.fieldId;
+                // let data = [{ id : column.fieldId, value : getBOMCellValue(edge.child, column.__self__.urn, bom.nodes, 'title')}];
+                insertField(settings[id], elemCell, column, item.details, settings[id].picklists, false, false);
+
+            } else {
+
+                // if(column.fieldTab === 'STANDARD_BOM') value = getBOMEdgeValue(edge, column.__self__.urn, null, '');
+                // else value = getBOMCellValue(edge.child, column.__self__.urn, bom.nodes, 'title');
+
+                elemCell.html(value)
+                    .addClass('bom-column-'  + column.fieldId.toLowerCase())
+                    .addClass('tree-column-' + column.fieldId.toLowerCase());
+
+            }
+
+            index++;
+
         }
-
-        if(settings[id].multiSelect) {
-
-            $('<td></td>').appendTo(elemRow)
-                .html('<div class="icon icon-check-box xxs"></div>')
-                .addClass('content-item-check-box')
-                .click(function(e) {
-                    clickContentItemCheckbox(e, $(this));
-                });
-    
-        }        
-
-        $('<td></td>').appendTo(elemRow).addClass('tree-color');
-
-        let elemFirstCol = $('<td></td>').appendTo(elemRow).addClass('tree-first-col');
-
-        if(item.hasChildren) {
-            $('<span></span>').appendTo(elemFirstCol).addClass('tree-nav').addClass('icon');
-            elemRow.addClass('node');
-        } else elemRow.addClass('leaf');
-
-        if(!settings[id].hideNumber) $('<span></span>').appendTo(elemFirstCol).addClass('tree-number');
-
-        $('<span></span>').appendTo(elemFirstCol).addClass('tree-title').html(item.title);
 
     }
 
 }
 function genTreePath(id) {
 
-    if(!settings[id].hasOwnProperty('path')) return;
-    if(!settings[id].path) return;
+    if(!settings[id].hasOwnProperty('treePath')) return;
+    if(!settings[id].treePath) return;
 
     $('<div></div>').appendTo($('#' + id))
         .attr('id', id + '-tree-path')
@@ -3691,48 +4397,54 @@ function genTreePath(id) {
 }
 function enableTreeToggles(id) {
 
-    $('#' + id).find('.tree-nav').click(function(e) {
-    
-        e.stopPropagation();
-        e.preventDefault();
+//     $('#' + id).find('.tree-nav').click(function(e) {
+//         clickTreeToggle(e, $(this))
+//     });
 
-        let elemItem    = $(this).closest('tr');
-        let level       = Number(elemItem.attr('data-level'));
-        let levelNext   = level - 1;
-        let levelHide   = level + 2;
-        let elemNext    = $(this).closest('tr');
-        let doExpand    = elemItem.hasClass('collapsed');
-        let filterValue = $('#' + id + '-search-input').val().toLowerCase();
-        let isFiltered  = (isBlank(filterValue)) ? false : true;
+}
+function clickTreeToggle(e, elemClicked) {
 
-        if(e.shiftKey) levelHide = 100;
+    e.stopPropagation();
+    e.preventDefault();
 
-        elemItem.toggleClass('collapsed');
+    let elemItem    = elemClicked.closest('tr');
+    let elemTop     = elemItem.closest('.panel-top');
+    let id          = elemTop.attr('id');
+    let level       = Number(elemItem.attr('data-level'));
+    let levelNext   = level - 1;
+    let levelHide   = level + 2;
+    let elemNext    = elemClicked.closest('tr');
+    let elemSearch  = $('#' + id + '-search-input');
+    let filterValue = (elemSearch.length > 0) ? elemSearch.val().toLowerCase() : '';
+    let doExpand    = elemItem.hasClass('collapsed');
+    let isFiltered  = (isBlank(filterValue)) ? false : true;
 
-        do {
+    if(e.shiftKey) levelHide = 100;
 
-            elemNext  = elemNext.next();
-            levelNext = Number(elemNext.attr('data-level'));
+    elemItem.toggleClass('collapsed');
 
-            if(levelNext > level) {
-                if(doExpand) {
-                    if(levelHide > levelNext) {
-                        if((!isFiltered) || elemNext.hasClass('result') || elemNext.hasClass('result-parent')) {
-                            elemNext.removeClass('hidden');
-                            if(e.shiftKey) {
-                                elemNext.removeClass('collapsed');
-                            }
+    do {
+
+        elemNext  = elemNext.next();
+        levelNext = Number(elemNext.attr('data-level'));
+
+        if(levelNext > level) {
+            if(doExpand) {
+                if(levelHide > levelNext) {
+                    if((!isFiltered) || elemNext.hasClass('result') || elemNext.hasClass('result-parent')) {
+                        elemNext.removeClass('hidden');
+                        if(e.shiftKey) {
+                            elemNext.removeClass('collapsed');
                         }
                     }
-                } else {
-                    elemNext.addClass('hidden');
-                    elemNext.addClass('collapsed');
                 }
+            } else {
+                elemNext.addClass('hidden');
+                elemNext.addClass('collapsed');
             }
+        }
 
-        } while(levelNext > level);
-
-    });
+    } while(levelNext > level);
 
 }
 function expandAllNodes(id) {
@@ -3750,6 +4462,28 @@ function collapseAllNodes(id) {
         if($(this).hasClass('node')) $(this).addClass('collapsed');
     });
     
+}
+function getTreeItemParent(elemItem, selector) {
+
+    if(isBlank(selector)) selector = '.tree-item';
+
+    let level = Number(elemItem.attr('data-level'));
+    
+    elemItem.prevAll(selector).each(function() {
+
+        let elemNext  = $(this);
+        let nextLevel = Number(elemNext.attr('data-level'));
+
+        if(nextLevel < level) {
+
+            return elemNext;
+
+        }
+
+    });
+
+    return null;
+
 }
 function getTreeItemPath(elemItem, pathSeparator) {
 
@@ -3793,9 +4527,9 @@ function getTreeItemPath(elemItem, pathSeparator) {
     return result;
 
 }
-function updateTreePath(elemClicked) {
+function treeUpdatePath(elemClicked) {
 
-    let elemTop = elemClicked.closest('.panel-top');
+    let elemTop  = elemClicked.closest('.panel-top');
     let id       = elemTop.attr('id');
     let elemPath = $('#' + id + '-tree-path');
 
@@ -3806,16 +4540,30 @@ function updateTreePath(elemClicked) {
     
     if(!elemClicked.hasClass('selected')) return;
     
-    let path  = getTreeItemPath(elemClicked);
-    let index = 0;
+    let path      = getTreeItemPath(elemClicked);
+    let index     = 0;
+    let pathTitle = settings[id].treePathTitle;
 
     elemPath.removeClass('tree-path-empty');
 
     for(let item of path.items) {
 
-        let title = item.attr('data-part-number') || item.attr('data-title');
+        let title = item.attr('data-part-number') || item.attr('data-title') || '';
 
-        title = title.split(' - ')[0];
+        if(title !== '') title = title.split(' - ')[0];
+       
+        if(pathTitle == 'dynamic') {
+            if(index < path.items.length - 1) {
+                title = item.children('.tree-first-col').find('.tree-number').html();
+            } else {
+                title = item.children('.tree-first-col').children().last().html();
+            }
+        }
+
+        if(title === '') {
+            let elemNumber = item.find('.tree-number').first();
+            if(elemNumber.length > 0) title = elemNumber.html();
+        }
 
         let elemItem = $('<div></div>').appendTo(elemPath)
             .attr('data-number', item.attr('data-number'))
@@ -3915,7 +4663,6 @@ function treeScrollToBottom(id) {
 }
 function treeScrollToItem(elemClicked, duration) {
 
-
     let index    = elemClicked.attr('data-index') || elemClicked.index();
     let panel    = elemClicked.closest('.panel-top');
     let id       = panel.attr('id');
@@ -3961,6 +4708,8 @@ function treeDisplayItemByPropertyValue(id, property, value, select, deselect) {
 }
 function treeDisplayItem(elemItem) {
 
+    if(elemItem.length === 0) return;
+
     let level = Number(elemItem.attr('data-level'));
     let panel = elemItem.closest('.panel-top');
     let id    = panel.attr('id');
@@ -3972,7 +4721,62 @@ function treeDisplayItem(elemItem) {
     
     elemTree.animate({ scrollTop: top }, 500);
 
-    if(settings[id].path) updateTreePath(elemItem);
+    if(settings[id].treePath) treeUpdatePath(elemItem);
+
+}
+function treeDisplayItemByPath(id, path, select, deselect) {
+
+    if(isBlank(path)) return;
+
+    id       = id       || 'bom';
+    select   = select   || true;
+    deselect = deselect || true;
+
+    let split    = path.split('|');
+    let result   = {
+        elements : [],
+        links    : []
+    }
+
+    if(deselect) $('.tree-item').removeClass('selected');
+
+    $('#' + id + ' .tree-item.level-1').each(function() {
+
+        let partNumber = $(this).attr('data-part-number');
+
+        if(partNumber === split[1]) {
+            getTreePathElements(split, 1, result, $(this), select, deselect);
+        }
+
+    });    
+
+    return result;
+
+}
+function getTreePathElements(path, index, result, elemItem, select, deselect) {
+
+    result.elements.push(elemItem);
+    result.links.push(elemItem.attr('data-link'));
+
+    if(index === (path.length - 1)) {
+
+        if(select) elemItem.addClass('selected');
+        treeDisplayItem(elemItem);
+
+    } else {
+        
+        let children = treeGetItemChildren(elemItem, true);
+
+        for(let child of children) {
+
+            let partNumber = child.attr('data-part-number');
+
+            if(partNumber === path[index + 1]) {
+                getTreePathElements(path, index + 1, result, child, select, deselect);
+            }
+
+        }
+    }
 
 }
 function treeExpandParents(level, elem) {
@@ -3998,7 +4802,8 @@ function treeExpandParents(level, elem) {
 }
 function treeUnhideParents(elem) {
 
-    let level = Number(elem.attr('data-level')) - 1;
+    let level   = Number(elem.attr('data-level')) - 1;
+    let parents = [];
 
     elem.prevAll().each(function() {
 
@@ -4007,9 +4812,12 @@ function treeUnhideParents(elem) {
         if(level === prevLevel) {
             level--;
             $(this).show();
+            parents.push($(this));
         }
 
     });
+
+    return parents;
 
 }
 function treeToggleDownloadPanelAndColumn(id) {
@@ -4025,6 +4833,7 @@ function treeToggleDownloadPanelAndColumn(id) {
     if(!elemTop.hasClass('with-files-download')) {
         if(elemDownloadOptions.length > 0) elemDownloadOptions.addClass('hidden');
         elemTop.find('.tree-files-download-status').remove();
+        elemTop.removeClass('with-files-download-preview');
         return;
     }
 
@@ -4069,7 +4878,8 @@ function treeToggleDownloadPanelAndColumn(id) {
             .append($('<option value="selected-subs">Selected Items & Sub Components</option>'))
             .append($('<option value="deselected">Deselected Items</option>'))
             .append($('<option value="filtered">Filtered Items</option>'))
-            .attr('id', id + '-tree-files-download-selected');   
+            .attr('id', id + '-tree-files-download-selected')
+            .change(() => updateDownloadPanelPreview(id));
         
         $('<div></div>').appendTo(elemDownloadOptions)
             .addClass('tree-files-download-options-label')
@@ -4084,7 +4894,8 @@ function treeToggleDownloadPanelAndColumn(id) {
         let elemSelectRange = $('<select></select>')
             .addClass('button')
             .addClass('tree-files-download-range')
-            .attr('id', id + '-tree-files-download-range');
+            .attr('id', id + '-tree-files-download-range')
+            .change(() => updateDownloadPanelPreview(id));
 
         let now = new Date();
 
@@ -4130,6 +4941,7 @@ function treeToggleDownloadPanelAndColumn(id) {
                 .html(fileFormat.label)
                 .click(function() {
                     $(this).toggleClass('icon-check-box').toggleClass('icon-check-box-checked');
+                    updateDownloadPanelPreview(id);
                 });
 
             if(!isBlank(fileFormat.tooltip)) elemFormat.attr('title', fileFormat.tooltip);
@@ -4141,7 +4953,9 @@ function treeToggleDownloadPanelAndColumn(id) {
             .addClass('tree-files-download-format-filter')
             .attr('id', id + '-tree-files-download-format-filter')
             .attr('placeholder', 'Custom')
-            .attr('title', 'Provide any text string that must be included in the filename; asterisks (*) will be appended automatically');
+            .attr('title', 'Provide any text string that must be included in the filename; asterisks (*) will be appended automatically')
+            .on('keyup', () => updateDownloadPanelPreview(id))
+            .change(() => updateDownloadPanelPreview(id));
 
 
         // Download Folder Selector
@@ -4227,6 +5041,30 @@ function treeToggleDownloadPanelAndColumn(id) {
 
 
         $('<div></div>').appendTo(elemDownloadOptions)
+            .addClass('tree-files-download-preview');
+
+        let elemPreview = $('<div></div>').appendTo(elemDownloadOptions)
+            .addClass('tree-files-download-preview');
+
+        $('<div></div>').appendTo(elemPreview)
+            .attr('id', id + '-tree-files-download-preview-selected')
+            .addClass('tree-files-download-preview-selected')
+            .html('-');
+
+        $('<div></div>').appendTo(elemPreview)
+            .addClass('tree-files-download-preview-of')
+            .html('of');
+
+        $('<div></div>').appendTo(elemPreview)
+            .addClass('tree-files-download-preview-total')
+            .html('-');
+
+        $('<div></div>').appendTo(elemPreview)
+            .attr('id', id + '-tree-files-download-preview-message')        
+            .addClass('tree-files-download-preview-message')
+            .html('files will be downloaded');
+
+        $('<div></div>').appendTo(elemDownloadOptions);
 
         let elemOptionsActions = $('<div></div>').appendTo(elemDownloadOptions)
             .addClass('tree-files-download-options-actions');   
@@ -4281,11 +5119,16 @@ function treeToggleDownloadPanelAndColumn(id) {
 
         $('<div></div').appendTo(elemProgressCounters)
             .addClass('tree-files-download-counters-label')
-            .html('Files Downloaded');
+            .html('Files Downloaded'); 
 
         let elemCountersProgress = $('<div></div').appendTo(elemProgressCounters)
             .addClass('tree-files-download-counters-progress-bar')   
-            .attr('id', id + '-tree-files-download-counters-progress-bar');   
+            .attr('id', id + '-tree-files-download-counters-progress-bar')
+            .attr('title', 'Click to scroll to current download processes')
+            .click(function() {
+                scrollToDownloadInProgress(id);
+            });
+
 
         $('<div></div').appendTo(elemCountersProgress).addClass('tree-files-download-counters-progress-done').attr('id', id + '-tree-files-download-counters-progress-done');
         $('<div></div').appendTo(elemCountersProgress).addClass('tree-files-download-counters-progress-curr').attr('id', id + '-tree-files-download-counters-progress-curr');
@@ -4294,6 +5137,19 @@ function treeToggleDownloadPanelAndColumn(id) {
 
         let elemCountersActions = $('<div></div').appendTo(elemProgressCounters)
             .addClass('tree-files-download-counters-actions');   
+
+        $('<div></div').appendTo(elemCountersActions)
+            .attr('id', id + '-tree-files-download-auto-scroll')
+            .addClass('tree-files-download-auto-scroll')   
+            .addClass('button')
+            .addClass('with-toggle')
+            .addClass('toggle-off')
+            .html('Auto-Scroll Tree')
+            .attr('id', id + '-tree-files-download-auto-scroll')
+            .attr('title', 'Click to enable automatic scrolling in tree to current download processes')
+            .click(function(e) {
+                $(this).toggleClass('toggle-on').toggleClass('toggle-off');
+            });          
 
         $('<div></div>').appendTo(elemCountersActions)
             .addClass('button')
@@ -4307,7 +5163,10 @@ function treeToggleDownloadPanelAndColumn(id) {
                 stopTreeDownloads(id);
             });  
 
-        $('<div></div>').appendTo(elemCountersActions)
+        let elemClosingActions = $('<div></div').appendTo(elemCountersActions)
+            .addClass('tree-files-download-completion-actions');
+
+        $('<div></div>').appendTo(elemClosingActions)
             .addClass('button')
             .addClass('default')
             .addClass('with-icon')
@@ -4320,7 +5179,7 @@ function treeToggleDownloadPanelAndColumn(id) {
                 returnToTreeDownloadOptions(id);
             }); 
 
-        $('<div></div>').appendTo(elemCountersActions)
+        $('<div></div>').appendTo(elemClosingActions)
             .addClass('button')
             .addClass('with-icon')
             .addClass('icon-close')
@@ -4349,6 +5208,26 @@ function treeToggleDownloadPanelAndColumn(id) {
 
     }
 
+    if(settings[id].bomPartsList.length > 0) {
+        if(settings[id].bomPartsList[0].attachments !== null) {
+
+            let count     = 0;
+            let prevLinks = [];
+
+            for(let part of settings[id].bomPartsList) {
+                if(!prevLinks.includes(part.link)) {
+                    count += part.attachments.length;
+                    prevLinks.push(part.link);
+                }
+            }
+
+            elemDownloadOptions.find('.tree-files-download-preview-total').html(count);
+            elemDownloadOptions.addClass('with-preview');
+            $('#' + id).addClass('with-files-download-preview');
+            updateDownloadPanelPreview(id);
+        }
+    }
+
     elemDownloadOptions.removeClass('hidden');
 
 }
@@ -4361,6 +5240,42 @@ function insertDateRangeFilter(elemSelectRange, label, days) {
     elemSelectRange.append($('<option value="' + date.getTime() + '">' + label + '</option>'));
 
 }
+function updateDownloadPanelPreview(id) {
+
+    if(!$('#' + id).hasClass('with-files-download-preview')) return;
+
+    const selection = $('#' + id + '-tree-files-download-selected').val();
+    const elemRange = $('#' + id + '-tree-files-download-range');
+    const formats   = getTreeDownloadSelectedFormats(id);
+    let elemMessage = $('#' + id + '-tree-files-download-preview-message');
+    let elemTBody   = $('#' + id + '-tbody');
+    
+    let countTotal = 0;
+    let prevLinks  = [];
+
+    countTotal += includeRootFilesInDownload(id, selection, formats) || 0;
+
+    elemTBody.children().each(function() {
+
+        const elemRow   = $(this);
+
+        elemRow.removeClass('tree-files-download-include').removeClass('tree-files-download-skip');
+
+        let countFiles = includeFilesInDownload(id, elemRow, selection, formats, prevLinks);
+
+        countTotal += countFiles || 0;
+
+    });
+
+    $('#' + id + '-tree-files-download-preview-selected').html(countTotal);
+
+    if (elemRange.prop('selectedIndex') === 0) {
+        elemMessage.html('files will be downloaded');
+    } else {
+        elemMessage.html('files will be downloaded at max (depends on file date)');
+    }
+
+}
 async function startTreeDownload(id) {
 
     if (!window.showDirectoryPicker) {
@@ -4370,19 +5285,14 @@ async function startTreeDownload(id) {
 
     try {
         
-        let fileHandler =  null;
-        let elemTBody   = $('#' + id + '-tbody');
-        let selection   = $('#' + id + '-tree-files-download-selected').val();
+        const elemTBody = $('#' + id + '-tbody');
+        const selection = $('#' + id + '-tree-files-download-selected').val();
+        const formats   = getTreeDownloadSelectedFormats(id);
+        let fileHandler = null;
         let subFolders  = $('#' + id + '-tree-files-download-subfolders').val();
         let items       = [];
+        let prevLinks   = [];
 
-        elemTBody.find('.tree-download-complete').removeClass('tree-download-complete');
-        elemTBody.find('.tree-files-download-status').html('');
-        
-        $('#' + id + '-tree-files-download-stop').removeClass('disabled').addClass('red');
-        $('#' + id + '-tree-files-download-files-list').html('');
-        $('#' + id + '-tree-files-download-files-header').html('Downloading files of ' + $('#' + id + '-tree-files-download-selected').children(':selected').html());
-        
         downloadQueue = {
             id         : id,
             requests   : settings[id].downloadRequests || 3,
@@ -4407,17 +5317,7 @@ async function startTreeDownload(id) {
             }
         };
 
-        $('.tree-files-download-format').each(function() {
-            let elemFormat = $(this);
-            if(elemFormat.hasClass('icon-check-box-checked')) {
-                let filters = elemFormat.attr('data-filter').split(',');
-                for(let filter of filters) downloadQueue.formats.push(filter);
-            }
-        });
-
-        let customFilter = $('#' + id + '-tree-files-download-format-filter').val();
-
-        if(!isBlank(customFilter)) downloadQueue.formats.push(customFilter);
+        downloadQueue.formats = getTreeDownloadSelectedFormats(id);
 
         if(downloadQueue.folder === 'local-drive') {
             downloadQueue.formats  = downloadQueue.formats.toString();
@@ -4425,6 +5325,14 @@ async function startTreeDownload(id) {
             downloadQueue.method   = 'get'
             fileHandler            = await window.showDirectoryPicker() ;
         }
+
+        elemTBody.find('.tree-download-complete').removeClass('tree-download-complete');
+        elemTBody.find('.tree-files-download-status').html('');
+
+        $('#' + id + '-tree-files-download-stop').removeClass('disabled').addClass('red');
+        $('#' + id + '-tree-files-download-files-list').html('');
+        $('#' + id + '-tree-files-download-files-header').html('Downloading files of ' + $('#' + id + '-tree-files-download-selected').children(':selected').html());        
+
 
         if(selection === 'all') {
      
@@ -4449,65 +5357,44 @@ async function startTreeDownload(id) {
 
             let elemRow = $(this);
             let link    = elemRow.attr('data-link');
-            let valid   = (selection === 'all');
             let level   = Number(elemRow.attr('data-level'));
             let title   = elemRow.attr('data-title').split(' [REV:')[0];
+            let count   = includeFilesInDownload(id, elemRow, selection, formats, prevLinks);
+            let valid   = (count > 0);
 
             if(level === 1) topLevelFolder = title;
             if(level > previousLevel) bomTreeFolders.push(title); else { bomTreeFolders.length = (level - 1); bomTreeFolders.push(title); }
 
-            previousLevel = level;
+            previousLevel = level;         
 
-            if(!elemRow.hasClass('tree-download-complete')) {
-    
-                if(selection === 'selected-subs') {
-                    if(elemRow.hasClass('selected')) { 
-                        valid = true;
-                    } else {
-                        let path = getTreeItemPath(elemRow, ';');
-                        for(let parent of path.links) {
-                            for(let downloadPending of downloadQueue.pending) {
-                                if(downloadPending.link === parent) {
-                                    valid = true;
-                                    break;
+            if(!elemRow.hasClass('tree-files-download-skip')) {
+                if(!elemRow.hasClass('tree-download-complete')) {
+
+                    if(!items.includes(link)) {
+                        if(valid) {
+                                
+                            if(subFolders !== 'top') {
+                                if(subFolders !== 'path') {
+                                    items.push(link);
                                 }
                             }
-                        }
+
+                            let subFolder = '';
+
+                                 if(subFolders === 'item') subFolder = elemRow.attr('data-title').split(' [REV:')[0];
+                            else if(subFolders === 'top' ) subFolder = topLevelFolder;
+                            else if(subFolders === 'path') subFolder = bomTreeFolders.toString().replaceAll(',', '/');
+
+                            downloadQueue.pending.push({
+                                link      : link,
+                                title     : elemRow.attr('data-title'),
+                                version   : getItemRevisionFromDescriptor(elemRow.attr('data-title')),
+                                subFolder : subFolder.trim(),
+                                index     : elemRow.index()
+                            });
+
+                        } 
                     }
-                } else if(elemRow.hasClass('selected')) { 
-                    if(selection === 'selected') valid = true; 
-                } else if(selection === 'deselected') {
-                    valid = true; 
-                } 
-
-                if(elemRow.hasClass('result')) {
-                    if(selection === 'filtered') valid = true;
-                }
-
-                if(!items.includes(link)) {
-                    if(valid) {
-                            
-                        if(subFolders !== 'top') {
-                            if(subFolders !== 'path') {
-                                items.push(link);
-                            }
-                        }
-
-                        let subFolder = '';
-
-                                if(subFolders === 'item') subFolder = elemRow.attr('data-title').split(' [REV:')[0];
-                        else if(subFolders === 'top' ) subFolder = topLevelFolder;
-                        else if(subFolders === 'path') subFolder = bomTreeFolders.toString().replaceAll(',', '/');
-
-                        downloadQueue.pending.push({
-                            link      : link,
-                            title     : elemRow.attr('data-title'),
-                            version   : getItemRevisionFromDescriptor(elemRow.attr('data-title')),
-                            subFolder : subFolder.trim(),
-                            index     : elemRow.index()
-                        });
-
-                    } 
                 }
             }
 
@@ -4516,6 +5403,7 @@ async function startTreeDownload(id) {
                 downloadQueue.counters.skipped++;
                 let elemCell = elemRow.find('.tree-files-download-status');
                 if(elemCell.length > 0) {
+                    elemCell.html('');
                     $('<div></div>').appendTo(elemCell)
                         .addClass('tree-file-downloaded')
                         .addClass('with-icon')
@@ -4531,9 +5419,10 @@ async function startTreeDownload(id) {
 
         $('#' + id + '-tree-files-download-options' ).toggleClass('hidden');
         $('#' + id + '-tree-files-download-progress').toggleClass('hidden');
+        $('#' + id + '-tree-files-download-auto-scroll').removeClass('hidden');
         $('#' + id + '-tree-files-download-stop').removeClass('hidden');
         $('#' + id + '-tree-files-download-counters-progress-bar').removeClass('hidden');
-        $('#' + id + '-tree-files-download-progress').find('.tree-files-download-completion-action').addClass('hidden');
+        $('#' + id + '-tree-files-download-progress').find('.tree-files-download-completion-actions').addClass('hidden');
         $('#' + id + '-tree-files-download-counters-total').html(downloadQueue.counters.total);
         $('#' + id + '-tree-files-download-counters-skipped').html(downloadQueue.counters.skipped);
         $('#' + id + '-tree-files-download-counters-files').html('0');
@@ -4542,9 +5431,122 @@ async function startTreeDownload(id) {
 
         for(let i = 0; i < downloadQueue.requests; i++) processTreeDownloads(fileHandler, downloadQueue, settings[id]);
 
-        // processTreeDownloads(fileHandler, downloadQueue);
-
     } catch (err) {}
+
+}
+function getTreeDownloadSelectedFormats(id) {
+
+    let result   = [];
+    let selected = $('#' + id + '-tree-files-download-formats').children('.icon-check-box-checked');
+    let custom   = $('#' + id + '-tree-files-download-format-filter').val();
+    
+    selected.each(function() {
+        let filters    = $(this).attr('data-filter').split(',');
+        for(let filter of filters) result.push(filter);
+    });
+
+
+    if(!isBlank(custom)) result.push(custom);
+
+    return result;
+
+}  
+function includeRootFilesInDownload(id, selection, formats) {
+
+    formats = formats || [];
+
+    if(selection !== 'all') return 0;
+
+    let count = 0;
+
+    for(let fileName of settings[id].bomPartsList[0].attachments) {
+
+        let included = (formats.length === 0);
+
+        for(let format of formats) {
+            if((fileName.toLowerCase().indexOf(format.toLowerCase()) >= 0)) {
+                included = true;
+            }
+        }
+
+        if(included) count++;
+
+    }
+
+    return count;
+
+}
+function includeFilesInDownload(id, elemRow, selection, formats, prevLinks) {
+
+    formats = formats || [];
+
+    const linkRow = elemRow.attr('data-link');
+    let   valid   = (selection === 'all');
+    let   count   = 0;
+
+    if(selection === 'selected-subs') {
+        if(elemRow.hasClass('selected')) { 
+            valid = true;
+        } else {
+            let path = getTreeItemPath(elemRow, ';');
+            for(let parent of path.items) {
+                if(parent.hasClass('selected')) {
+                    valid = true;
+                    break;
+                }
+            }
+        }                
+    } else if(elemRow.hasClass('selected')) { 
+        if(selection === 'selected') valid = true; 
+    } else if(selection === 'deselected') {
+        valid = true; 
+    } 
+
+    if(elemRow.hasClass('result')) {
+        if(selection === 'filtered') valid = true;
+    }    
+
+    for(let part of settings[id].bomPartsList) {
+
+        if(linkRow === part.link) {
+
+            if(part.attachments === null) return 1;
+
+            for(let fileName of part.attachments) {
+
+                let included = (formats.length === 0);
+
+                for(let format of formats) {
+                    if((fileName.toLowerCase().indexOf(format.toLowerCase()) >= 0)) {
+                        included = true;
+                    }
+                }
+
+                if(included && valid) count++;
+
+            }
+
+            if(count > 0) elemRow.addClass('tree-files-download-include')
+                     else elemRow.addClass('tree-files-download-skip');
+            
+            let elemCell = elemRow.find('.tree-files-download-status');
+                elemCell.html('');
+
+            $('<div></div>').appendTo(elemCell)
+                .addClass('tree-files-download-status-preview')
+                .html(count + ' / ' + part.attachments.length);
+
+            break;
+
+        }
+
+    }
+
+    if(prevLinks.includes(linkRow)) return 0;
+    
+    prevLinks.push(linkRow);
+
+    return count;
 
 }
 async function processTreeDownloads(fileHandler, downloadQueue, settings) {
@@ -4555,11 +5557,18 @@ async function processTreeDownloads(fileHandler, downloadQueue, settings) {
 
     if(downloadQueue.pending.length === 0) {
 
-        $('#' + downloadQueue.id + '-tree-files-download-counters-progress-bar').addClass('hidden');
-        $('#' + downloadQueue.id + '-tree-files-download-stop').addClass('hidden');
-        $('#' + downloadQueue.id + '-tree-files-download-progress').find('.tree-files-download-completion-action').removeClass('hidden');
+        if($('.tree-files-download-processing').length === 0) {
 
-        downloadQueue.stopped = true;
+            if($('#' + downloadQueue.id + '-tree-files-download-auto-scroll').hasClass('toggle-on')) scrollToDownloadInProgress(downloadQueue.id);
+
+            $('#' + downloadQueue.id + '-tree-files-download-counters-progress-bar').addClass('hidden');
+            $('#' + downloadQueue.id + '-tree-files-download-auto-scroll').addClass('hidden');
+            $('#' + downloadQueue.id + '-tree-files-download-stop').addClass('hidden');
+            $('#' + downloadQueue.id + '-tree-files-download-progress').find('.tree-files-download-completion-actions').removeClass('hidden');
+
+            downloadQueue.stopped = true;
+
+        }
 
     } else {
 
@@ -4731,6 +5740,8 @@ async function processTreeDownloads(fileHandler, downloadQueue, settings) {
 
         }
 
+        if($('#' + downloadQueue.id + '-tree-files-download-auto-scroll').hasClass('toggle-on')) scrollToDownloadInProgress(downloadQueue.id);
+
         downloadQueue.counters.completed++;
         downloadQueue.counters.files += response.data.length;
 
@@ -4773,7 +5784,7 @@ async function processTreeDownloads(fileHandler, downloadQueue, settings) {
         }
 
         downloadQueue.success.push(response.params.link);
-        processTreeDownloads(fileHandler, downloadQueue, settings)
+        processTreeDownloads(fileHandler, downloadQueue, settings);
 
     }
 
@@ -4852,6 +5863,28 @@ async function createDirectory(fileHandler, path) {
         console.error("Failed to create directory:", err.message);
     }
 }
+function scrollToDownloadInProgress(id) {
+
+    let elemTBody    = $('#' + id + '-tbody');
+    let elemProgress = elemTBody.find('.tree-files-download-processing').first();
+
+    if(elemProgress.length === 0) {
+
+        treeScrollToBottom(id);
+
+    } else {
+
+        let elemTree = $('#' + id + '-content');
+        let elemItem = elemProgress.closest('.content-item');
+        let top      = elemTree.innerHeight() / 2;
+
+        top = elemItem.position().top - top;
+
+        elemTree.animate({ scrollTop: top }, 50);
+
+    }
+
+}
 function stopTreeDownloads(id) {
 
     downloadQueue.stopped        = true;
@@ -4872,17 +5905,19 @@ function returnToTreeDownloadOptions(id) {
 function closeTreeDownloadPanel(id) {
 
     $('#' + id).removeClass('with-files-download');
+    $('#' + id).removeClass('with-files-download-preview');
     $('#' + id + '-tree-files-download-options').addClass('hidden');
     $('#' + id + '-tree-files-download-progress').addClass('hidden');
 
 }
-function treeGetItemChildren(elemClicked, firstLevelOnly) {
+function treeGetItemChildren(elemRef, firstLevelOnly, classFilter) {
 
-    if(isBlank(firstLevelOnly)) firstLevelOnly = false;
+    firstLevelOnly = firstLevelOnly || false;
+    classFilter    = classFilter    || '';
 
-    let level     = Number(elemClicked.attr('data-level'));
+    let level     = Number(elemRef.attr('data-level'));
     let levelNext = level - 1;
-    let elemNext  = elemClicked;
+    let elemNext  = elemRef;
     let children  = [];
 
     do {
@@ -4893,9 +5928,13 @@ function treeGetItemChildren(elemClicked, firstLevelOnly) {
         if(levelNext > level) {
             if(firstLevelOnly) {
                 if((levelNext - level) === 1 ) {
-                    children.push(elemNext); 
+                    if(classFilter === '' || elemNext.hasClass(classFilter)) {
+                        children.push(elemNext); 
+                    }
                 }
-            } else children.push(elemNext);
+            } else if(classFilter === '' || elemNext.hasClass(classFilter)) { 
+                children.push(elemNext);
+            }
         }
 
     } while(levelNext > level);
@@ -4905,7 +5944,7 @@ function treeGetItemChildren(elemClicked, firstLevelOnly) {
 }
 function treeGetItemParent(elemItem) {
 
-    let level = Number(elemItem.attr('data-level'));
+    const level = Number(elemItem.attr('data-level'));
     let elemParent = null;
 
     elemItem.prevAll().each(function() {
@@ -4918,6 +5957,111 @@ function treeGetItemParent(elemItem) {
     });
 
     return elemParent;
+
+}
+function treeToggleItemNodeClass(elemItem) {
+
+    if(elemItem        === null) return;
+    if(elemItem.length ===    0) return;
+
+    const listChildren = treeGetItemChildren(elemItem, false);
+
+    if(listChildren.length > 0) {
+        if(elemItem.hasClass('leaf')) {
+            elemItem.addClass('node').removeClass('leaf').removeClass('first-leaf');
+            const elemFirstCol = elemItem.find('.tree-first-col');
+            $('<span></span>').prependTo(elemFirstCol)
+                .addClass('tree-nav')
+                .addClass('icon')
+                .click(function(e) {
+                    clickTreeToggle(e, $(this));
+                })
+        }
+    } else {
+        if(elemItem.hasClass('node')) {
+            elemItem.addClass('leaf').removeClass('node');
+            elemItem.find('.tree-nav').remove();
+        }        
+    }
+
+}
+function treeSetItemChanged(elemItem) {
+
+    if(elemItem       === null) return;
+    if(elemItem.length ===   0) return;
+
+    let elemChangeIndicator = elemItem.find('.tree-change-indicator');
+    
+    if(elemChangeIndicator.length === 0) {
+        let elemCellLast = elemItem.children().last();
+        elemChangeIndicator = $('<span></span>').appendTo(elemCellLast).addClass('tree-change-indicator');
+    }
+
+    elemItem.addClass('changed');
+
+    return elemChangeIndicator;
+
+}
+function treeResetItemsChanged(id) {
+
+    $('#' + id).find('.changed').each(function() {
+        $(this).removeClass('changed');
+        $(this).find('.tree-change-indicator').remove();
+    });
+
+}
+function treeInsertIconColumn(id, filled, icon) {
+
+    filled = filled || false;
+    icon   = icon   || '';
+
+    $('#' + id + ' .tree-item').each(function() {
+
+        let elemCell = $('<td></td>').appendTo($(this))
+            .addClass('tree-icon');
+
+        let elemIcon = $('<div></div>').appendTo(elemCell)
+            .addClass('icon');
+            
+        if(filled) elemIcon.addClass('filled');
+        if(icon !== '') elemIcon.addClass(icon);
+
+    });
+
+}
+function onTreeDragEnter(e) {
+
+    e.preventDefault();
+    e.stopPropagation();
+
+    let elemTarget = $(e.target);
+
+    if(!elemTarget.hasClass('tree-item')) elemTarget = elemTarget.closest('.tree-item');
+
+    elemTarget.addClass('drag-hover');
+
+}
+function onTreeDragOver(e) {
+
+    e.preventDefault();
+    e.stopPropagation();
+
+    let elemTarget = $(e.target);
+
+    if(!elemTarget.hasClass('tree-item')) elemTarget = elemTarget.closest('.tree-item');
+
+    elemTarget.addClass('drag-hover');
+
+}
+function onTreeDragLeave(e) {
+
+    $('.drag-hover').removeClass('drag-hover');
+
+}
+function onTreeDrop(e) {
+
+    e.preventDefault();
+    e.stopPropagation();
 
 }
 
@@ -5005,6 +6149,7 @@ function genTiles(id, items) {
             tileNumber  : count++, 
             number      : settings[id].number, 
             partNumber  : item.partNumber,
+            revision    : item.revision,
             imageId     : item.imageId, 
             imageLink   : item.imageLink, 
             imageFile   : item.imageFile, 
@@ -5017,7 +6162,6 @@ function genTiles(id, items) {
         }, settings[id]).appendTo(elemContent);
 
         
-        // if(!isBlank(settings[id].groupBy) && (settings[id].groupLayout === 'horizontal')) elemTile.appendTo(elemGroupList);
         if(!isBlank(settings[id].groupBy)) elemTile.appendTo(elemGroupList);
 
         if(!isBlank(item.filters)) {
@@ -5145,6 +6289,14 @@ function genSingleTile(params, panelSettings) {
        }
     }
 
+    if(panelSettings.tileRevision) {
+        $('<div></div>')
+            .addClass('tile-revision')
+            .html(params.revision)
+            .appendTo(elemTile);
+    }
+
+
     if(!isBlank(panelSettings.stateColors)) {
 
         if(panelSettings.stateColors.length > 0) {
@@ -5235,9 +6387,26 @@ function genSingleTile(params, panelSettings) {
 
     } else {
 
-        $('<img>').appendTo(elemTileImage).attr('src', '/storage/cache/' + params.imageFile);
+        $('<img>').appendTo(elemTileImage).attr('src', '/storage/images/' + params.imageFile);
 
     }
+
+    if(panelSettings.dragable) {
+
+        elemTile.attr('draggable'  , 'true');
+        elemTile.attr('ondragstart', panelSettings.onDragStart);
+        elemTile.attr('ondragend'  , panelSettings.onDragEnd  );
+
+    }        
+    
+    if(panelSettings.dropable) {
+
+        elemTile.attr('ondragenter', panelSettings.onDragEnter);
+        elemTile.attr('ondragover' , panelSettings.onDragOver );
+        elemTile.attr('ondragleave', panelSettings.onDragLeave);
+        elemTile.attr('ondrop'     , panelSettings.onDrop     );
+
+    }      
 
     addTileActions(params, elemTile);
 
@@ -5285,9 +6454,30 @@ function addTilesListImages(id) {
     });
 
 }
+function addTileThumbnail(elemTile) {
+
+    const link      =  elemTile.attr('data-link');
+    const dmsId     = link.split('/').pop();
+    const elemImage = elemTile.find('.tile-image');
+
+    $.get('/plm/image-cache', {
+        link     : link,
+        fileName : dmsId + '.jpg'
+    }, function(response) {
+
+        if(response.error) return;
+
+        $('<img>').attr('src', response.data.url).on('load', function() {
+            elemImage.html('');
+            elemImage.append($(this));
+        });
+
+    });    
+
+}
 function addTilesListChevrons(id, callback) {
 
-    if(!settings[id].expand) return;
+    if(!settings[id].tileToggle) return;
 
     $('#' + id + '-content').children('.tile').each(function() {
         
@@ -5339,13 +6529,14 @@ function addTileActions(params, elemTile) {
 // Generate HTML Table & interactions
 function genTable(id, items) {
 
-    if(isBlank(settings[id].multiSelect)) settings[id].multiSelect = false;
-    if(isBlank(settings[id].editable)   ) settings[id].editable    = false;
-    if(isBlank(settings[id].position)   ) settings[id].position    = false;
-    if(isBlank(settings[id].descriptor) ) settings[id].descriptor  = false;
-    if(isBlank(settings[id].quantity)   ) settings[id].quantity    = false;
-    if(isBlank(settings[id].hideDetails)) settings[id].hideDetails = false;
-    if(isBlank(settings[id].mode       )) settings[id].mode        = 'initial';
+    settings[id].multiSelect       = settings[id].multiSelect       || false;
+    settings[id].editable          = settings[id].editable          || false;
+    settings[id].position          = settings[id].position          || false;
+    settings[id].descriptor        = settings[id].descriptor        || false;
+    settings[id].hideTableColumns  = settings[id].hideTableColumns  || false;
+    settings[id].tableColumnsLimit = settings[id].tableColumnsLimit || 100;
+    settings[id].quantity          = settings[id].quantity          || false;
+    settings[id].mode              = settings[id].mode              || 'initial';
 
     let elemContent = $('#' + id + '-content');
     let elemTBody   = $('#' + id + '-tbody');
@@ -5401,11 +6592,11 @@ function genTableHeaders(id, elemTHead) {
 
     }
 
-    if(settings[id].number    ) $('<th></th>').appendTo(elemTHRow).addClass('content-column-number').html('Nr');
+    if(settings[id].number    ) $('<th></th>').appendTo(elemTHRow).addClass('content-column-number'    ).html('Nr');
     if(settings[id].descriptor) $('<th></th>').appendTo(elemTHRow).addClass('content-column-descriptor').html('Item');
-    if(settings[id].quantity  ) $('<th></th>').appendTo(elemTHRow).addClass('content-column-quantity').html('Qty');
+    if(settings[id].quantity  ) $('<th></th>').appendTo(elemTHRow).addClass('content-column-quantity'  ).html('Qty');
 
-    if(!settings[id].hideDetails) {
+    if(!settings[id].hideTableColumns) {
 
         for(let column of settings[id].columns) {
             
@@ -5430,7 +6621,7 @@ function genTableTotals(elemTHead, params) {
     if(params.descriptor) $('<th></th>').appendTo(elemTotals).html('Totals');
     if(params.quantity  ) $('<th></th>').appendTo(elemTotals).html(0).addClass('panel-total').attr('data-id', 'quantity');
 
-    if(!params.hideDetails) {
+    if(!params.hideTableColumns) {
 
         for(let column of params.columns) {
 
@@ -5458,7 +6649,7 @@ function genTableRanges(elemTHead, params) {
     if(params.descriptor) $('<th></th>').appendTo(elemRanges).html('Range');
     if(params.quantity  ) $('<th></th>').appendTo(elemRanges).html(0).addClass('panel-range').attr('data-id', 'quantity');
 
-    if(!params.hideDetails) {
+    if(!params.hideTableColumns) {
 
         for(let column of params.columns) {
             
@@ -5517,7 +6708,7 @@ function genTableRows(id, elemTBody, items, editableFields) {
         if(settings[id].descriptor) $('<td></td>').appendTo(elemRow).addClass('content-column-descriptor').html(item.title);                
         if(settings[id].quantity  ) $('<td></td>').appendTo(elemRow).addClass('content-column-quantity').html(quantity);
 
-        if(!settings[id].hideDetails) {
+        if(!settings[id].hideTableColumns) {
 
             for(let column of settings[id].columns) {
 
@@ -5576,6 +6767,8 @@ function genTableRows(id, elemTBody, items, editableFields) {
                 
                                 }
                             }
+                        } else if(typeof value === 'object') {
+                            value = value.title || '';
                         }
 
                         if(!isBlank(field.classNames)) {
@@ -5606,6 +6799,23 @@ function genTableRows(id, elemTBody, items, editableFields) {
         addTableActions(item, elemRow, settings[id]);
 
         if(first === null) first = elemRow.position().top;
+
+        if(settings[id].dragable) {
+
+            elemRow.attr('draggable'  , 'true');
+            elemRow.attr('ondragstart', settings[id].onDragStart);
+            elemRow.attr('ondragend'  , settings[id].onDragEnd  );
+
+        }        
+        
+        if(settings[id].dropable) {
+
+            elemRow.attr('ondragenter', settings[id].onDragEnter);
+            elemRow.attr('ondragover' , settings[id].onDragOver );
+            elemRow.attr('ondragleave', settings[id].onDragLeave);
+            elemRow.attr('ondrop'     , settings[id].onDrop     );
+
+        }           
 
     }
 
@@ -5732,7 +6942,7 @@ function collapseAllTableGroups(id) {
 function panelPaginationLoadNext(panelSettings) {
 
     panelSettings.page++;
-    panelSettings.offset += panelSettings.limit;
+    panelSettings.offset += Number(panelSettings.limit);
     panelSettings.mode = 'next';
 
     if(typeof panelSettings['next'] === 'undefined') panelSettings.load(); else panelSettings.next();
@@ -5824,7 +7034,7 @@ function clickContentItem(e, elemClicked) {
 
     togglePanelToolbarActions(id);
     updatePanelCalculations(id);
-    updateTreePath(elemClicked);
+    treeUpdatePath(elemClicked);
     selectInViewer(id);
     
     clickContentItemDone(e, elemClicked);
@@ -5840,6 +7050,36 @@ function clickContentItemDone(e, elemClicked) {}
 
 
 
+// Panel Drag & Drop placeholders
+function onDragStart(e) {
+
+    $('.dragged'   ).removeClass('dragged'   );
+    $('.drag-hover').removeClass('drag-hover');
+
+    $(e.target).addClass('dragged');
+
+}
+function onDragEnd  (e) {}
+function onDragEnter(e) {
+
+    e.preventDefault();
+    e.stopPropagation();
+
+    $(e.target).addClass('drag-hover');
+
+}
+function onDragOver (e) {
+
+    e.preventDefault();
+    e.stopPropagation();
+
+}
+function onDragLeave(e) { 
+
+    $('.drag-hover').removeClass('drag-hover'); 
+
+}
+function onDrop(e) {}
 
 
 
@@ -6147,11 +7387,19 @@ function storeNewBOMEdgeId(action, elements, responses) {
     let index = 0;
 
     for(let element of elements) {
+
+        let response = responses[index++];
+
+        if(response.url === '/bom-add') {
+
+            const edgeId = response.data.split('/bom-items/')[1];
+            
+            element.attr('data-parent', response.params.linkParent);
+            element.attr('data-edgeid', edgeId);
+
+        }
         
-        let edgeId = responses[index++].data.split('/bom-items/')[1];
-        
-        element.attr('data-edgeid', edgeId);
-        element.removeClass(action.className);
+        element.removeClass(action.className);    
 
     }
 
@@ -6413,7 +7661,7 @@ function replaceBOMItems(link, itemsPrev, itemsNext, callback) {
                 dataReplacements[indexBOMRemoval].quantity = response.data.quantity;
                 dataReplacements[indexBOMRemoval].number   = response.data.itemNumber;
 
-                reqBOMRemovals.push($.get('/plm/bom-remove', { edgeLink : response.params.edgeLink }));
+                reqBOMRemovals.push($.post('/plm/bom-remove', { edgeLink : response.params.edgeLink }));
 
                 indexBOMRemoval++;
 
@@ -6911,6 +8159,26 @@ function getSectionFieldValue(sections, fieldId, defaultValue, property) {
     }
 
     return defaultValue;
+
+}
+
+
+// Retrieve field type from item's sections data
+function getSectionFieldType(sections, fieldId) {
+
+    if(typeof sections === 'undefined') return '';
+    if(sections === null) return '';
+
+    for(let section of sections) {
+        for(let field of section.fields) {
+            let id = field.__self__.split('/')[10];
+            if(id === fieldId) {
+                return field.type.title;
+            }
+        }
+    }
+
+    return '';
 
 }
 
@@ -7488,6 +8756,14 @@ function getGridRowId(row) {
 }
 
 
+// Retrieve link of grid row
+function getGridRowLink(row) {
+
+    return row.rowData[0].__self__;
+
+}
+
+
 // Retrieve field value from item's grid row data
 function getGridRowValue(row, fieldId, defaultValue, property) {
 
@@ -7504,7 +8780,9 @@ function getGridRowValue(row, fieldId, defaultValue, property) {
 
             if(isBlank(value)) return defaultValue;
 
-            if(typeof value === 'object') {
+            if(Array.isArray(value)) { 
+                return value;
+            } else if(typeof value === 'object') {
 
                 if(isBlank(property)) { return field.value.link;
                 } else if(property == 'title') { 

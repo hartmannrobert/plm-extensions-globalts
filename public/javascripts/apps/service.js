@@ -3,18 +3,7 @@ let workspaceIds = {};
 let bomPartList  = [];
 let links        = {};
 let user         = {};
-let urns         = {
-    thumbnail     : '', 
-    partNumber    : '', 
-    title         : '', 
-    description   : '', 
-    spareWearPart : '', 
-    material      : '', 
-    mass          : '',
-    dimensions    : ''
-}
 
-// let bom, flatBOM;
 let listServiceItems      = { spareParts : [], kit : [], offering : [], wearParts : []};
 let wsProblemReports      = { id : '', sections : [], fields : [] };
 let wsSparePartsRequests  = { id : '', sections : [], fields : [] };
@@ -22,20 +11,9 @@ let finishedLoading       = {};
 let paramsItemDetails     = {}
 let paramsItemAttachments = {}
 let paramsDocumentation   = {}
-let paramsProcesses       = { 
-    hideHeader          : true, 
-    createWSID          : '',
-    createHeaderLabel       : 'Create Problem Report',
-    createContextItemFields : ['AFFECTED_ITEM'],
-    createViewerImageFields : [],
-    editable            : true,
-    fieldIdMarkup       : '',
-    openInPLM           : true,
-    reload              : true,
-    useCache            : true,
-    contentSize         : 'm',
-    singleToolbar       : 'actions'
-}
+
+
+let disableViewerSelectionEvent = false;
 
 
 $(document).ready(function() {
@@ -44,27 +22,27 @@ $(document).ready(function() {
     appendOverlay();
     insertMenu();
 
-    paramsProcesses.createPerformTransition = config.problemReports.transitionOnCreate;
+    workspaceIds = config.workspaceIds;
 
-    workspaceIds = {
-        products           : config.products.workspaceId           || common.workspaceIds.products,
-        sparePartsRequests : config.sparePartsRequests.workspaceId || common.workspaceIds.sparePartsRequests,
-        problemReports     : config.problemReports.workspaceId     || common.workspaceIds.problemReports,
-        assets             : config.assets.workspaceId             || common.workspaceIds.assets,
-        orderProjects      : config.orderProjects.workspaceId      || common.workspaceIds.orderProjects,
-        assetServices      : config.assetServices.workspaceId      || common.workspaceIds.assetServices,
-    }
-    
+    workspaceIds.products           = workspaceIds.products           || common.workspaceIds.products;
+    workspaceIds.sparePartsRequests = workspaceIds.sparePartsRequests || common.workspaceIds.sparePartsRequests;
+    workspaceIds.problemReports     = workspaceIds.problemReports     || common.workspaceIds.problemReports;
+    workspaceIds.orderProjects      = workspaceIds.orderProjects      || common.workspaceIds.orderProjects;
+    workspaceIds.equipments         = workspaceIds.equipments         || common.workspaceIds.equipments;
+    workspaceIds.equipmentServices  = workspaceIds.equipmentServices  || common.workspaceIds.equipmentServices;
+
     let requests = [ 
         $.get('/plm/me', { useCache : true }),
         $.get('/plm/sections', { wsId : workspaceIds.sparePartsRequests, useCache : true }),
-        $.get('/plm/bom-view-by-name', { wsId : common.workspaceIds.items, name : config.items.bomViewName, useCache : true })
+        $.get('/plm/bom-view-by-name', { wsId : common.workspaceIds.items, name : (config.panels.itemBOM.bomViewName || 'Service'), useCache : true }),
+        $.get('/services/chrome')
     ];
 
     getFeatureSettings('service', requests, function(responses) {
 
-        user           = responses[0].data;
-        bomViewIdItems = responses[2].data.id;
+        user            = responses[0].data;
+        bomViewIdItems  = responses[2].data.id;
+        dataContextMenu = responses[3];
 
         $('#request-name'   ).val(user.displayName || '');
         $('#request-company').val(user.organization|| '');
@@ -74,20 +52,16 @@ $(document).ready(function() {
         $('#request-postal' ).val(user.postal      || '');
         $('#request-country').val(user.country     || '');  
 
-        paramsProcesses.createViewerImageFields.push(config.problemReports.fieldIdImage);
-
-        paramsProcesses.createWSID    = workspaceIds.problemReports;
-        paramsProcesses.workspacesIn  = [workspaceIds.problemReports.toString()];
         wsProblemReports.id           = workspaceIds.problemReports;
         wsSparePartsRequests.id       = workspaceIds.sparePartsRequests;       
         wsSparePartsRequests.sections = responses[1].data;
 
-        paramsItemDetails        = config.paramsItemDetails;
+        paramsItemDetails        = config.panels.itemDetails;
         paramsItemDetails.id     = 'details-top';
-        paramsItemAttachments    = config.paramsItemAttachments;
+        paramsItemAttachments    = config.panels.itemAttachments;
         paramsItemAttachments.id = 'details-bottom';
         
-        paramsDocumentation            = config.paramsDocumentation;
+        paramsDocumentation            = config.panels.tabDocumentation;
         paramsDocumentation.id         = 'documentation';
         paramsDocumentation.hideHeader = true;
         
@@ -98,12 +72,8 @@ $(document).ready(function() {
 
             $('body').addClass('screen-main').removeClass('screen-landing').removeClass('screen-request');
 
-            if(urlParameters.wsidcontext == workspaceIds.assets) {
-                let link = '/api/v3/workspaces/' + urlParameters.wsidcontext + '/items/' + urlParameters.dmsidcontext;
-                openSelectedProductOrAsset(link, 'assets', config.assets.fieldIDs);
-            } else if(urlParameters.wsidcontext == workspaceIds.products) {
-                let link = '/api/v3/workspaces/' + urlParameters.wsidcontext + '/items/' + urlParameters.dmsidcontext;
-                openSelectedProductOrAsset(link, 'products', config.products.fieldIDs);
+            if((urlParameters.wsId == workspaceIds.products) || (urlParameters.wsId == workspaceIds.equipments)) {
+                openSelectedContext(urlParameters.link);
             } else if(urlParameters.link !== '') {
                 links.ebom = urlParameters.link;
                 openItem();
@@ -149,16 +119,16 @@ function setUIElements() {
         $('#workflow-actions').remove();
     }
 
-    if(urlParameters.type === 'assets') {
+    if(urlParameters.mode === 'equipments') {
         $('#products').remove();
     } else {
-        $('#services').remove();
-        $('#projects').remove();
-        $('#assets'  ).remove();
+        $('#services'  ).remove();
+        $('#projects'  ).remove();
+        $('#equipments').remove();
     }
 
-    $('#tab-your-requests').html(config.labels.homeSparePartRequests);
-    $('#tab-your-problems').html(config.labels.homeProblemReports);
+    $('#tab-your-requests').html(config.panels.sparePartsRequests.headerLabel);
+    $('#tab-your-problems').html(config.panels.problemReports.headerLabel);
 
     if(!applicationFeatures.manageSparePartRequests) {
         if(!applicationFeatures.manageProblemReports) {
@@ -178,40 +148,30 @@ function setLandingPage() {
 
     if(applicationFeatures.homeButton || isBlank(urlParameters.dmsId)) {
 
-        if(urlParameters.type !== 'assets') {
+        if(urlParameters.mode !== 'equipments') {
 
             if(!isBlank(workspaceIds.products)) {
+
+                let params = config.panels.products;
+
+                params.id          = 'products';
+                params.onClickItem = function(elemClicked) { openSelectedContext(elemClicked.attr('data-link')); }
                 
-                insertResults(workspaceIds.products, config.products.filter ,{
-                    id          : 'products',
-                    headerLabel : config.products.headerLabel, 
-                    icon        : config.products.icon,
-                    groupBy     : config.products.groupBy,
-                    contentSize : config.products.contentSize,
-                    // sortBy      : config.products.sortBy, 
-                    tileImage   : config.products.tileImage, 
-                    tileImageFieldId  : config.products.tileImageFieldId, 
-                    tileTitle   : config.products.tileTitle, 
-                    tileSubtitle: config.products.tileSubtitle, 
-                    search      : true,
-                    layout      : 'grid',
-                    groupLayout : 'horizontal',
-                    onClickItem : function(elemClicked) { openSelectedProductOrAsset(elemClicked.attr('data-link'), 'product', config.products.fieldIDs); }
-                });
+                insertResults(workspaceIds.products, config.panels.products.filter, params);
 
             }
 
         } else {
 
-            let filterAssetServices = [{
-                field       : config.assetServices.fieldIDs.assignee,
+            let filterEquipmentServices = [{
+                field       : config.equipmentServices.fieldIDs.assignee,
                 type        : 0,
                 comparator  : 5,
                 value       : user.displayName          
             }];
 
-            for(let status of config.assetServices.hideStates) {
-                filterAssetServices.push({
+            for(let status of config.equipmentServices.hideStates) {
+                filterEquipmentServices.push({
                     field       : 'WF_CURRENT_STATE',
                     type        : 1,
                     comparator  : 5,
@@ -219,22 +179,16 @@ function setLandingPage() {
                 });
             }
 
-            insertResults(workspaceIds.assetServices, filterAssetServices, {
-                id          : 'services',
-                headerLabel : config.assetServices.headerLabel,
-                layout      : 'list',
-                contentSize : 'xs',
-                tileIcon    : 'icon-service',
-                number      : false,
-                reload      : true,
-                useCache    : false,
-                onClickItem : function(elemClicked) { openSelectedAssetService(elemClicked); }
-            });
+            let paramsServices = config.panels.equipmentServices;
+                paramsServices.id          = 'services';
+                paramsServices.onClickItem = function(elemClicked) { openSelectedEquipmentService(elemClicked); };
 
-            let filterAssetProjects = [];                
+            insertResults(workspaceIds.equipmentServices, filterEquipmentServices, paramsServices);
+
+            let filterEquipmentProjects = [];                
 
             for(let status of config.orderProjects.hideStates) {
-                filterAssetProjects.push({
+                filterEquipmentProjects.push({
                     field       : 'WF_CURRENT_STATE',
                     type        : 1,
                     comparator  : 5,
@@ -242,23 +196,13 @@ function setLandingPage() {
                 });
             }
 
-            insertResults(workspaceIds.orderProjects, filterAssetProjects, {
-                id             : 'projects',
-                headerLabel    : config.orderProjects.headerLabel,
-                layout         : 'grid',
-                contentSize    : 'l',
-                tileImage      : true,
-                tileImageFieldId : 'IMAGE',
-                tileTitle      : 'TITLE',
-                tileSubtitle   : config.orderProjects.tileSubtitle,
-                tileDetails    : config.orderProjects.tileDetails,
-                reload         : true,
-                search         : true,
-                useCache       : true,
-                openInPLM      : applicationFeatures.openInPLM,
-                openOnDblClick : applicationFeatures.openInPLM,
-                onClickItem    : function(elemClicked) { selectProject (elemClicked); }
-            });
+            let paramsProjects = config.panels.orderProjects;
+                paramsProjects.id             = 'projects';
+                paramsProjects.openInPLM      = paramsProjects.openInPLM || applicationFeatures.openInPLM;
+                paramsProjects.openOnDblClick = paramsProjects.openOnDblClick || applicationFeatures.openInPLM;
+                paramsProjects.onClickItem    = function(elemClicked) { selectProject (elemClicked); }
+
+            insertResults(workspaceIds.orderProjects, filterEquipmentProjects, paramsProjects);
 
         }
 
@@ -269,21 +213,12 @@ function setLandingPage() {
 
     if(applicationFeatures.manageSparePartRequests) {
 
-        let params = {
-            id           : 'your-requests',
-            headerLabel  : config.labels.homeSparePartRequests,
-            layout       : 'list',
-            contentSize  : 'xs',
-            tileIcon     : 'icon-package',
-            number       : false,
-            search       : true,
-            reload       : true,
-            tileImage    : false,
-            tileTitle    : 'DESCRIPTOR',
-            tileSubtitle : 'REQUEST_DATE',
-            stateColors  : config.sparePartsRequests.stateColors,
-            onClickItem  : function(elemClicked) { openRequest(elemClicked); }
-        };
+        let params = config.panels.sparePartsRequests;
+
+        params.id                = 'your-requests';
+        params.openSelectedInPLM = params.openSelectedInPLM || applicationFeatures.openInPLM,
+        params.openOnDblClick    = params.openOnDblClick || applicationFeatures.openOnDblClick,
+        params.onClickItem       = function(elemClicked) { openRequest(elemClicked); }
 
         if(applicationFeatures.manageProblemReports) {
             params.hideHeader    = true;
@@ -302,7 +237,7 @@ function setLandingPage() {
             field       : 'WF_CURRENT_STATE',
             type        : 1,
             comparator  : 5,
-            value       : 'Completed'            
+            value       : 'Completed'                     
         },{
             field       : 'WF_CURRENT_STATE',
             type        : 1,
@@ -314,33 +249,12 @@ function setLandingPage() {
 
     if(applicationFeatures.manageProblemReports) {
 
-        let params = {
-            id               : 'your-problems',
-            headerLabel      : config.labels.homeProblemReports,
-            layout           : 'list',
-            contentSizes     : ['l', 'm', 'xs', 'xxs'],
-            search           : true,
-            reload           : true,
-            openOnDblClick   : true,
-            // imagtileImag  e  : false,
-            openInPLM        : applicationFeatures.openInPLM,
-            openOnDblClick   : applicationFeatures.openInPLM,
-            tileImage        : true,
-            tileImageFieldId : 'IMAGE_1',
-            tileTitle        : 'DESCRIPTOR',
-            tileSubtitle     : 'DESCRIPTION',
-            tileDetails      : [{
-                icon    : 'icon-tag',
-                fieldId : 'TYPE',
-                prefix  : 'PR Type'
-            }, {
-                icon    : 'icon-select',
-                fieldId : 'SOURCE',
-                prefix  : 'PR Source'
-            }],
-            stateColors : config.problemReports.stateColors,
-            onClickItem : function(elemClicked) { openProblemReport(elemClicked); }
-        };
+        let params = config.panels.problemReports;
+
+        params.id                = 'your-problems';
+        params.openSelectedInPLM = params.openSelectedInPLM || applicationFeatures.openInPLM,
+        params.openOnDblClick    = params.openOnDblClick    || applicationFeatures.openOnDblClick,
+        params.onClickItem       = function(elemClicked) { openProblemReport(elemClicked); }
 
         if(applicationFeatures.manageSparePartRequests) {
             params.hideHeader    = true;
@@ -364,42 +278,19 @@ function setLandingPage() {
         
     } else $('#tab-your-problems').remove();
 
-    
-    // if(!isBlank(dmsId)) {
-        
-    //     $('body').addClass('screen-main').removeClass('screen-landing').removeClass('screen-request');
-
-    //     let params       = document.location.href.split('?')[1].split('&');
-    //     let wsidcontext  = null;
-    //     let dmsidcontext = null;
-
-    //     for(let param of params) {
-    //                 if(param.toLowerCase().indexOf('wsidcontext=' ) === 0) { wsidcontext  = param.split('=')[1]; }
-    //         else if(param.toLowerCase().indexOf('dmsidcontext=') === 0) { dmsidcontext = param.split('=')[1]; }
-    //     }
-
-    //     if(!isBlank(wsidcontext)) {
-    //         if(!isBlank(dmsidcontext)) {
-    //             links.context = '/api/v3/workspaces/' + wsidcontext + '/items/' + dmsidcontext;
-    //         }
-    //     }
-
-    //     openItem();
-
-    // } else $('#landing').show();
-
 }
 function setUIEvents() {
 
     // Close current product display and return to landing page
     if(applicationFeatures.homeButton) {
         $('#home').click(function() {
+            removeContextMenuEntries();
             viewerLeaveMarkupMode();
             viewerUnloadAllModels();
             $('body').addClass('screen-landing').removeClass('screen-main').removeClass('screen-request');
             document.title = documentTitle;
             let url = '/service?theme=' + theme;
-            if(!isBlank(urlParameters.type)) url += '&type=' + urlParameters.type;
+            if(!isBlank(urlParameters.mode)) url += '&mode=' + urlParameters.mode;
             window.history.replaceState(null, null, url);
             setLandingPage();
         });
@@ -408,7 +299,7 @@ function setUIEvents() {
 
     // Toggles in header toolbar
     $('#toggle-service').click(function() {
-        $('body').toggleClass('no-asset-service');
+        $('body').toggleClass('no-equipment-service');
         viewerResize();
     })
     $('#toggle-bom').click(function() {
@@ -492,29 +383,24 @@ function selectProject(elemClicked) {
 
     if(!isSelected) {
 
-        $('body').addClass('no-assets-list');
+        $('body').addClass('no-equipments-list');
         return;
 
     } else {
 
-        $('body').removeClass('no-assets-list');
+        $('body').removeClass('no-equipments-list');
 
-        insertResults(workspaceIds.assets, [{
-            field       : config.assets.fieldIDs.project,
+        let paramsEquippments = config.panels.equipments;
+            paramsEquippments.headerLabel = paramsEquippments.headerLabel || 'Equipments of ' + descriptor;
+            paramsEquippments.openInPLM   = paramsEquippments.openInPLM   || applicationFeatures.openInPLM;
+            paramsEquippments.onClickItem = function(elemClicked) { openSelectedContext(elemClicked.attr('data-link')); }
+
+        insertResults(workspaceIds.equipments, [{
+            field       : config.fieldIds.equipments.project,
             type        : 0,
             comparator  : 15,
             value       : descriptor
-        }], {
-            id           : 'assets',
-            headerLabel  : 'Assets of ' + descriptor,
-            layout       : 'table',
-            contentSize  : 'm',
-            fields       : config.assets.tableColumns,
-            useCache     : true,
-            search       : true,
-            openInPLM    : applicationFeatures.openInPLM,
-            onClickItem  : function(elemClicked) { openSelectedProductOrAsset(elemClicked.attr('data-link'), 'asset', config.assets.fieldIDs); }
-        });
+        }], paramsEquippments);
 
     }
 
@@ -524,48 +410,30 @@ function selectProject(elemClicked) {
 // Click on existing Spare Parts Request or Problem Report in Landing Page
 function openRequest(elemClicked) {
 
-    let link = elemClicked.attr('data-link');
+    let link   = elemClicked.attr('data-link');
+    let params = config.panels.sparePartsRequest;
 
-    insertItemSummary(link, {
-        bookmark : false,
-        contents : [
-            { type : 'workflow-history', className : 'surface-level-1', params : { id : 'request-workflow-history' } },
-            { type : 'details'         , className : 'surface-level-1', params : { id : 'request-details', expandSections : config.sparePartsRequests.sectionsExpanded, suppressLinks : true, sectionsEx : config.sparePartsRequests.sectionsExcluded } },
-            { type : 'grid'            , className : 'surface-level-1', params : { id : 'request-grid', headerLabel : 'Part List', fieldsEx : config.sparePartsRequests.gridColumnsExcluded } },
-            { type : 'attachments'     , className : 'surface-level-1', params : { id : 'request-attachments', editable : true, contentSize : 'm', layout : 'list', singleToolbar : 'controls' } },
-        ],
-        statesColors    : config.sparePartsRequests.stateColors,  
-        layout          : 'dashboard',
-        reload          : false,
-        openInPLM       : applicationFeatures.openInPLM,
-        workflowActions : applicationFeatures.requestWorkflowActions
-    })
+    params.openInPLM   = params.openInPLM   || applicationFeatures.openInPLM;
+    params.stateColors = params.stateColors || config.panels.sparePartsRequests.stateColors || [];
+
+    insertItemSummary(link, params);
 
 }
 function openProblemReport(elemClicked) {
 
-    let link = elemClicked.attr('data-link');
+    let link   = elemClicked.attr('data-link');
+    let params = config.panels.problemReport;
 
-    insertItemSummary(link, {
-        bookmark : false,
-        contents : [
-            { type : 'workflow-history', className : 'surface-level-1', params : { id : 'request-workflow-history' } },
-            { type : 'details'         , className : 'surface-level-1', params : { id : 'request-details', expandSections : config.problemReports.sectionsExpanded, suppressLinks : true, sectionsEx : config.problemReports.sectionsExcluded } },
-            { type : 'grid'            , className : 'surface-level-1', params : { id : 'request-grid', headerLabel : 'Notes' } },
-            { type : 'attachments'     , className : 'surface-level-1', params : { id : 'request-attachments', editable : true, layout : 'tiles', singleToolbar : 'controls' } },
-        ],
-        statesColors    : config.problemReports.stateColors,
-        layout          : 'dashboard',
-        reload          : false,
-        openInPLM       : applicationFeatures.openInPLM,
-        workflowActions : applicationFeatures.problemWorkflowActions
-    })
+    params.openInPLM   = params.openInPLM   || applicationFeatures.openInPLM;
+    params.stateColors = params.stateColors || config.panels.problemReports.stateColors || [];    
+
+    insertItemSummary(link, params); 
 
 }
 
 
-// Click on Product or Asset in landing page
-function openSelectedAssetService(elemClicked) {
+// Click on Product or Equipment in landing page
+function openSelectedEquipmentService(elemClicked) {
 
     $('#overlay').show();
     $('#toggle-service').removeClass('hidden');
@@ -575,99 +443,62 @@ function openSelectedAssetService(elemClicked) {
 
     $.get('/plm/details', { link : links.service }, function(response) {
 
-        let linkAsset = getSectionFieldValue(response.data.sections, config.assetServices.fieldIDs.asset    , '', 'link');
-        let linkSNL   = getSectionFieldValue(response.data.sections, config.assetServices.fieldIDs.serialnrs, '', 'link');
+        links.context = getSectionFieldValue(response.data.sections, config.equipmentServices.fieldIDs.equipment, '', 'link');
+        links.snl     = getSectionFieldValue(response.data.sections, config.equipmentServices.fieldIDs.serialnrs, '', 'link');
 
-        openSelectedProductOrAsset(linkAsset, 'asset', config.assets.fieldIDs, links.service, linkSNL);
+        openSelectedContext(links.context);
+
+        let paramsEquipmentService = config.panels.equipmentService;
+            paramsEquipmentService.id = 'service';
        
-        insertItemSummary(links.service, {
-            contents : [{
-                type : 'details',
-                params : { 
-                    id             : 'service-details', 
-                    editable       : true,
-                    hideHeader     : true,
-                    expandSections : config.assetServices.detailsPanel.expandSections,
-                    sectionsEx     : config.assetServices.detailsPanel.excludeSections
-                }
-            },{ 
-                type   : 'grid',
-                params : { 
-                    id         : 'service-grid', 
-                    fieldsEx   : ['Comments', 'Required Tools'], 
-                    hideHeader : true,
-                } 
-            }, { 
-                type : 'attachments',
-                params : { 
-                    id : 'service-attachments', 
-                    editable : true, 
-                    layout : 'list', 
-                    contentSize : 'm', 
-                    singleToolbar : 'controls'
-                }
-            }],
-            statesColors    : [
-                { label : 'New',         color : 'red',    states : ['Received'] },
-                { label : 'In Work',     color : 'yellow', states : ['Review', 'Quote Creation'] },
-                { label : 'Waiting',     color : 'red',    states : ['Awaiting Response', 'Quote Submitted'] },
-                { label : 'Delivery',    color : 'yellow', states : ['Order in process', 'Shipment'] },
-                { label : 'Completed',   color : 'green',  states : ['Completed'] }
-            ],
-            id              : 'service',
-            hideCloseButton : true,
-            layout          : 'tabs',
-            openInPLM       : false,
-            reload          : false,
-            workflowActions : true
-        });        
+        insertItemSummary(links.service, paramsEquipmentService);     
 
     });
 
 }
-function openSelectedProductOrAsset(link, type, fieldIDs, linkService, linkSNL) {
+function openSelectedContext(link) {
 
     $('#overlay').show();
 
     links.context = link;
 
-    if(isBlank(linkService)) {
+    let contextWsId = link.split('/')[4];
+    let fieldIds    = {};
 
-        $('body').addClass('no-asset-service').removeClass('no-panel');
+    switch(Number(contextWsId)) {
+
+        case workspaceIds.products:
+            fieldIds = config.fieldIds.products;
+            break;
+
+        case workspaceIds.equipments:
+            fieldIds = config.fieldIds.equipments;
+            break;
+
+        default:
+            fieldIds = config.fieldIds.custom;
+            break;
+
+    } 
+
+    if(isBlank(links.service)) {
+
+        $('body').addClass('no-equipment-service').removeClass('no-panel');
         $('#toggle-service').addClass('hidden');
 
     } else {
 
-        $('body').removeClass('no-asset-service');
+        $('body').removeClass('no-equipment-service');
 
     }
-    
-    $.get('/plm/details', { link : links.context, requestor : 'service.js | openSelectedProductOrAsset()' }, function(response) {
 
-        links.ebom = getSectionFieldValue(response.data.sections, fieldIDs.ebom, '', 'link');
-        links.sbom = getSectionFieldValue(response.data.sections, fieldIDs.sbom, '', 'link');
-        links.snl  = linkSNL;
+    $.get('/plm/details', { link : links.context, requestor : 'service.js | openSelectedContext()' }, function(response) {
 
-        if(isBlank(linkSNL)) {
-            if(type === 'asset') {
-                links.snl = getSectionFieldValue(response.data.sections, fieldIDs.serialnrs, '', 'link');
-            } 
-        }
-
-        if(isBlank(links.ebom)) {
-            showErrorMessage('Invalid Product Data', 'BOM of the selected ' + type + ' is not availalbe, please contact your administrator');
-            return;
-        }
+        links.ebom = getSectionFieldValue(response.data.sections, fieldIds.ebom, '', 'link');
+        links.sbom = getSectionFieldValue(response.data.sections, fieldIds.sbom, '', 'link');
+        links.snl  = links.snl  ||  getSectionFieldValue(response.data.sections, fieldIds.serialnrs, '', 'link');
 
         $('body').addClass('screen-main').removeClass('screen-landing').removeClass('screen-request');
-
-        let splitEBOM    = links.ebom.split('/');
-        let splitContext = links.context.split('/');
-        let url          = '/service?wsid=' + splitEBOM[4] + '&dmsid=' + splitEBOM[6] + '&wsidcontext=' + splitContext[4] + '&dmsidcontext=' + splitContext[6] + '&theme=' + theme;
-
-        if(!isBlank(urlParameters.type)) url += '&type=' + urlParameters.type;
-
-        window.history.replaceState(null, null, url);
 
         openItem();
 
@@ -676,20 +507,23 @@ function openSelectedProductOrAsset(link, type, fieldIDs, linkService, linkSNL) 
 }
 function openItem() {
 
-    listServiceItems = { spareParts : [], kit : [], offering : [], wearParts : []}
+    insertContextMenuEntries((links.context || links.ebom));
+
+    listServiceItems = { spareParts : [], kit : [], offering : [], wearParts : [] }
 
     $('#header-subtitle').html('');
-    $('#cart-list').html('');
-    $('#items-content').html('');
+    $('#cart-list'      ).html('');
+    $('#items-content'  ).html('');
+
     $('#items-processing').show();
     $('#overlay').hide();
 
     if(isBlank(links.snl)) $('#toggle-snl').addClass('hidden'); else $('#toggle-snl').removeClass('hidden');
-    if(isBlank(links.context)) $('body').addClass('no-asset-service');
+    if(isBlank(links.context)) $('body').addClass('no-equipment-service');
     
     adjustCartHeight();
 
-    $.get('/plm/descriptor', { link : (links.context || links.ebom)}, function(response) {
+    $.get('/plm/descriptor', { link : (links.context || links.ebom) }, function(response) {
         $('#header-subtitle').html(response.data);
         document.title = documentTitle + ': ' + response.data;
     });
@@ -703,42 +537,32 @@ function openItem() {
 
     $('#tabs').children().first().click();
 
-    // if(isBlank(sections)) getInitialData(links.bom.split('/')[4]);
+    let paramsBOM = config.panels.itemBOM; 
 
-    let paramsBOM = {
-        bomViewName         : config.items.bomViewName, 
-        collapseContents    : true,
-        contentSize         : 's',
-        reset               : true, 
-        path                : true, 
-        hideDetails         : false, 
-        quantity            : true,
-        counters            : true,
-        includeBOMPartList  : true, 
-        search              : true,
-        showRestricted      : false,
-        toggles             : true,
-        openInPLM           : config.applicationFeatures.openInPLM,
-        revisionBias        : config.items.bomRevisionBias,
-        endItem             : config.items.endItemFilter,
-        selectItems         : { fieldId : config.items.fieldIdSparePart, values : config.items.fieldValuesSparePart },
-        onClickItem         : function(elemClicked) { onClickBOMItem(elemClicked); }
-    }
-
-    let keys = Object.keys(config.paramsBOM);
+    paramsBOM.bomViewName       = paramsBOM.bomViewName || 'Service';
+    paramsBOM.openSelectedInPLM = paramsBOM.openSelectedInPLM || config.applicationFeatures.openInPLM;
+    paramsBOM.selectItems       = { fieldId : config.items.fieldIdSparePart, values : config.items.fieldValuesSparePart };
+    paramsBOM.onClickItem       = function(elemClicked) { onClickBOMItem(elemClicked); }
 
     if(isiPad) paramsBOM.singleToolbar = 'actions';
-
-    for(let key of keys) paramsBOM[key] = config.paramsBOM[key];
 
     finishedLoading.engineeringBOM = false;
     finishedLoading.serviceBOM     = false;
     
-    insertBOM          (links.ebom, paramsBOM);
-    insertViewer       (links.ebom);
-    updateRelatedPanels(links.ebom);
+    if(!isBlank(links.ebom)) {
+        $('#toggle-bom').removeClass('hidden');
+        insertBOM          (links.ebom, paramsBOM);
+        insertViewer       (links.ebom, { features : config.viewerFeatures });
+        updateRelatedPanels(links.ebom);
+    } else {
+        $('#toggle-bom').addClass('hidden');
+        finishedLoading.engineeringBOM = true;
+        $('body').addClass('no-bom');
+    }
 
-    if(!isBlank(links.sbom)) insertServiceBOM(); else finishedLoading.serviceBOM = true;
+    if(!isBlank(links.sbom)) {
+        insertServiceBOM(); 
+    } else finishedLoading.serviceBOM = true;
 
     if(isBlank(links.snl)) {
         
@@ -755,8 +579,8 @@ function openItem() {
             singleToolbar : 'controls',
             fieldsIn      : config.serialNumbers.tableColumns,
             editable      : true,
-            groupBy       : config.serialNumbers.fieldIDs.partNumber,
-            sortBy        : config.serialNumbers.fieldIDs.instanceId,
+            groupBy       : config.fieldIds.serialNumbers.partNumber,
+            sortBy        : config.fieldIds.serialNumbers.instanceId,
             sortType      : 'integer',
             onClickItem   : function(elemClicked) { selectSerialNumber(elemClicked); }
         });
@@ -766,8 +590,15 @@ function openItem() {
 }
 function updateRelatedPanels(link) {
 
-    paramsProcesses.createContextItems      = [link];
-    paramsProcesses.createContextItemFields = ['AFFECTED_ITEM'];
+    let paramsProcesses = config.panels.tabProblemReports;
+
+    // paramsProcesses.createPerformTransition = config.problemReports.transitionOnCreate;
+    paramsProcesses.createViewerImageFields = [ config.fieldIds.problemReports.image ];
+    paramsProcesses.createWorkspaceId       = workspaceIds.problemReports;
+    paramsProcesses.workspacesIn            = [workspaceIds.problemReports.toString()];
+    paramsProcesses.createContextItems      = [ link ];
+    paramsProcesses.createContextItemFields = paramsProcesses.createContextItemFields || [ 'AFFECTED_ITEM' ];
+    paramsProcesses.onDblClickItem          = function(elemClicked) { openProblemReport(elemClicked); }
 
     if(!isBlank(links.context)) {
         paramsProcesses.createContextItems.push(links.context);
@@ -779,51 +610,6 @@ function updateRelatedPanels(link) {
     if(applicationFeatures.manageProblemReports) insertChangeProcesses(link, paramsProcesses      );
 
 }
-
-
-// Retrieve Workspace Details
-// function getInitialData(wsId) {
-
-//     let promises = [
-//         $.get('/plm/sections'   , { wsId : wsId }),
-//         $.get('/plm/fields'     , { wsId : wsId }),
-//         $.get('/plm/sections'   , { wsId : wsProblemReports.id }),
-//         $.get('/plm/fields'     , { wsId : wsProblemReports.id }),
-//         $.get('/plm/sections'   , { wsId : wsSparePartsRequests.id })
-//     ];
-
-//     Promise.all(promises).then(function(responses) {
-
-//         let errors = false;
-
-//         for(let response of responses) {
-//             if(response.error) {
-//                 let message = (isBlank(response.data.message)) ? 'Error in accessing ' + response.params.url : response.data.message;
-//                 showErrorMessage('Error occured', message);
-//                 errors = true;
-//             }
-//         }
-
-//         if(!errors) {
-//             sections                        = responses[0].data;
-//             fields                          = responses[1].data;
-//             wsProblemReports.sections       = responses[2].data;
-//             wsProblemReports.fields         = responses[3].data;
-//             wsProblemReports.fieldIdImage   = config.problemReports.fieldIdImage;
-//             wsSparePartsRequests.sections   = responses[4].data;
-
-//             if(isBlank(config.problemReports.fieldIdImage)) {
-//                 wsProblemReports.fieldIdImage = getFirstImageFieldID(wsProblemReports.fields);
-//                 paramsProcesses.fieldIdMarkup = wsProblemReports.fieldIdImage;
-//                 if(applicationFeatures.manageProblemReports) insertChangeProcesses(link, paramsProcesses);
-//             }
-
-
-//         }
-
-//     });
-
-// }     
 
 
 // Parse BOM for Spare Parts
@@ -839,7 +625,6 @@ function openBOMViewDone(id, bom, selectedItems, additionalData, partList) {
         if(selectedItems.length > 15) $('#items-content').removeClass('l').addClass('m');
 
         // let fields         = [];
-        // let urnsSpareParts = [];
         // let fieldIdImage   = config.items.fieldIdImage;
         let elemContent    = $('#items-content');
 
@@ -849,28 +634,6 @@ function openBOMViewDone(id, bom, selectedItems, additionalData, partList) {
         //         break;
         //     }
         // }
-
-        // if(isBlank(fieldIdImage)) fieldIdImage = getFirstImageFieldID(fields);
-
-        // for(let field of fields) {
-
-        //     let urnField = field.__self__.urn;
-
-        //     switch(field.fieldId) {
-        //         case 'NUMBER'                                     : urnsSpareParts.partNumber   = urnField; break;
-        //         case 'TITLE'                                      : urnsSpareParts.title        = urnField; break;
-        //         case 'DESCRIPTION'                                : urnsSpareParts.description  = urnField; break;
-        //         case fieldIdImage                                 : urnsSpareParts.image        = urnField; break;
-        //         case common.workspaces.items.fieldIdNumber                   : urnsSpareParts.partNumber   = urnField; break;
-        //         case config.fieldId                       : urnsSpareParts.spareWearPart= urnField; break;
-        //         case config.items.sparePartTileDetails[0] : urnsSpareParts.material     = urnField; break;
-        //         case config.items.sparePartTileDetails[1] : urnsSpareParts.weight       = urnField; break;
-        //         case config.items.sparePartTileDetails[2] : urnsSpareParts.dimensions   = urnField; break;
-        //     }
-
-        // }
-        
-        // insertBOMSpareParts(elemContent, selectedItems, urnsSpareParts, flatBOM);
         
         $('#items-processing').hide();
 
@@ -878,206 +641,74 @@ function openBOMViewDone(id, bom, selectedItems, additionalData, partList) {
 
         setSparePartStockStatus();
         insertNonSparePartMessage();
-        
 
     }
 
     finishSparePartsList();
-    
 
 }
-// function insertBOMSpareParts(elemParent, selectedItems, urnsSpareParts, flatBOM) {
-
-//     let params = { 
-//         icon     : 'icon-settings',
-//         replace  : true
-//     }
-
-//     for(let selectedItem of selectedItems) {
-
-//         listServiceItems.spareParts.push(selectedItem.node.item.link);
-
-//         let elemSparePart = $('<div></div>').appendTo(elemParent)
-//             .addClass('tile')
-//             .addClass('spare-part')
-//             .attr('data-link', selectedItem.node.item.link)
-//             .attr('data-part-number', selectedItem.node.partNumber)
-//             .attr('data-qty', selectedItem.node.totalQuantity)
-//             .click(function(e) {
-//                 clickSparePart($(this));
-//             });
-                        
-//         let elemSparePartImage = $('<div></div>').appendTo(elemSparePart)
-//             .addClass('spare-part-image')
-//             .addClass('tile-image');
-                
-//         $('<span></span>').appendTo(elemSparePartImage)
-//             .addClass('icon')
-//             .addClass(params.icon);
-
-//         params.imageLink = getFlatBOMCellValue(flatBOM, selectedItem.node.item.link, urnsSpareParts.image);
-    
-//         if(params.imageLink === '') {
-//             $.get('/plm/details', { 'link' : selectedItem.node.item.link}, function(response) {
-//                 params.imageLink = getFirstImageFieldValue(response.data.sections);
-//                 $('.spare-part').each(function() {
-//                     if($(this).attr('data-link') === response.params.link) {
-//                         let elemImage = $(this).find('.spare-part-image').first();
-//                         appendImageFromCache(elemImage, {}, params, function() {});
-//                     }
-//                 });
-//             });
-//         } else appendImageFromCache(elemSparePartImage, {}, params, function() {});
-                    
-//         let elemSparePartDetails = $('<div></div>').appendTo(elemSparePart)
-//             .addClass('spare-part-details')
-//             .addClass('tile-details');
-
-//         let elemSparePartData = $('<div></div>').appendTo(elemSparePartDetails)
-//             .addClass('spare-part-data')
-//             .addClass('tile-data');
-    
-//         let elemSparePartID = $('<div></div>').appendTo(elemSparePartDetails)
-//             .addClass('spare-part-identifier');
-    
-//         $('<div></div>').appendTo(elemSparePartID)
-//             .addClass('spare-part-quantity')
-//             .html(Number(selectedItem.node.totalQuantity));
-    
-//         $('<div></div>').appendTo(elemSparePartID)
-//             .addClass('spare-part-number')
-//             .addClass('tile-title')
-//             .html(selectedItem.node.partNumber);    
-        
-//         let title = selectedItem.node.item.title;
-
-//         if(title.indexOf(selectedItem.node.partNumber) === 0) title = selectedItem.node.item.title.split(' - ')[1];
-
-//         $('<div></div>').appendTo(elemSparePartDetails)
-//             .addClass('spare-part-title')
-//             .html(title);  
-    
-//         $('<div></div>').appendTo(elemSparePartData)
-//             .addClass('spare-part-material')
-//             .addClass('with-icon')
-//             .addClass('icon-product')
-//             .addClass('filled')
-//             .html(getBOMNodeValue(selectedItem.node, urnsSpareParts.material));
-            
-//         let partSpec        = '';
-//         let partWeight      = getBOMNodeValue(selectedItem.node, urnsSpareParts.weight);
-//         let partDimensions  = getBOMNodeValue(selectedItem.node, urnsSpareParts.dimensions);
-                
-//         if(partWeight !== '') {
-//             partSpec = partWeight;
-//             if(partWeight !== '') partSpec = partWeight + ' / ' + partDimensions;
-//         } else partSpec = partDimensions
-    
-//         $('<div></div>').appendTo(elemSparePartData)
-//             .addClass('spare-part-dimensions')
-//             .addClass('with-icon')
-//             .addClass('icon-width')
-//             .html(partSpec);
-    
-//         let elemSparePartSide = $('<div></div>').appendTo(elemSparePart)
-//             .addClass('spare-part-side');
-    
-//         let elemCartQuantity = $('<div></div>').appendTo(elemSparePartSide)
-//             .addClass('cart-quantity')
-//             .click(function(e) {
-//                 e.preventDefault();
-//                 e.stopPropagation();
-//             });
-    
-//         $('<div></div>').appendTo(elemCartQuantity)
-//             .addClass('cart-quantity-label')
-//             .html('Qty');
-    
-//         $('<input></input>').appendTo(elemCartQuantity)
-//             .addClass('cart-quantity-input')
-//             .val('1');
-    
-//         let elemCartAdd = $('<div></div>').appendTo(elemSparePartSide)
-//             .addClass('button')
-//             .addClass('cart-add')
-//             .click(function(e) {
-//                 e.preventDefault();
-//                 e.stopPropagation();
-//                 moveSparePart($(this));
-//             });  
-                
-//         $('<div></div>').appendTo(elemCartAdd)
-//             .addClass('icon')
-//             .addClass('icon-cart-add');
-    
-//         $('<div></div>').appendTo(elemCartAdd)
-//             .html('Add to cart');
-    
-//         $('<div></div>').appendTo(elemSparePartSide)
-//             .addClass('button')
-//             .addClass('icon')
-//             .addClass('icon-delete')
-//             .addClass('cart-remove')
-//             .click(function(e) {
-//                 e.preventDefault();
-//                 e.stopPropagation();
-//                 moveSparePart($(this));
-//             });  
-    
-//             if(applicationFeatures.showStock) {
-//                 $('<div></div>').appendTo(elemSparePartSide).addClass('spare-part-stock');
-//             }
-
-//     }
-
-// }
 function insertServiceBOM() {
 
     let elemContent = $('#items-content');
-        elemContent.addClass('service-bom').removeClass('l').addClass('m');
 
     let params = {
         link            : links.sbom,
-        depth           : 4,
+        depth           : (links.ebom === '') ? 1 : 4,
         viewId          : bomViewIdItems,
         getBOMPartsList : true,
     }
 
     $.get('/plm/bom', params, function(response) {
 
-        let elemListGroup     = insertSparePartsGroup(elemContent, config.serviceBOMTypes.sparePart.groupLabel);
-        let elemListParts     = insertSparePartsList(elemContent);
-        let elemKitsGroup     = insertSparePartsGroup(elemContent, config.serviceBOMTypes.kit.groupLabel);
-        let elemKitsParts     = insertSparePartsList(elemContent);
-        let elemOfferingGroup = insertSparePartsGroup(elemContent, config.serviceBOMTypes.offering.groupLabel);
-        let elemOfferingParts = insertSparePartsList(elemContent);
-        let elemComponents    = null;
-        let type              = '';
+        if(links.ebom !== '') {
 
-        for(let bomPart of response.data.bomPartsList) {
+             elemContent.addClass('service-bom').removeClass('l').addClass('m');
 
-            if(bomPart.level === 1 && bomPart.details.TYPE === config.serviceBOMTypes.sparePart.fieldValue) { 
-                type = 'sparePart'; 
-            } else if(bomPart.level === 1 && bomPart.details.TYPE === config.serviceBOMTypes.kit.fieldValue) { 
-                type = 'kit'; 
-                let elemKit = insertSparePart(elemKitsParts, bomPart, 'kit');
-                elemComponents = insertSparePartComponents(elemKit);
-            } else if(bomPart.level === 1 && bomPart.details.TYPE === config.serviceBOMTypes.offering.fieldValue) { 
-                type = 'offering'; 
-                let elemOffering = insertSparePart(elemOfferingParts, bomPart, 'offering');
-                elemComponents = insertSparePartComponents(elemOffering);
-            } else if(bomPart.level === 2) {
-                if(type === 'sparePart') insertSparePart(elemListParts, bomPart, 'sparePart');
-                else if(type === 'kit') {
-                    listServiceItems.kit.push(bomPart.link);
-                    insertSparePartComponent(elemComponents, bomPart);
+            let elemListGroup     = insertSparePartsGroup(elemContent, config.serviceBOMTypes.sparePart.groupLabel);
+            let elemListParts     = insertSparePartsList(elemContent);
+            let elemKitsGroup     = insertSparePartsGroup(elemContent, config.serviceBOMTypes.kit.groupLabel);
+            let elemKitsParts     = insertSparePartsList(elemContent);
+            let elemOfferingGroup = insertSparePartsGroup(elemContent, config.serviceBOMTypes.offering.groupLabel);
+            let elemOfferingParts = insertSparePartsList(elemContent);
+            let elemComponents    = null;
+            let type              = '';
+
+            for(let bomPart of response.data.bomPartsList) {
+
+                if(bomPart.level === 1 && bomPart.details.TYPE === config.serviceBOMTypes.sparePart.fieldValue) { 
+                    type = 'sparePart'; 
+                } else if(bomPart.level === 1 && bomPart.details.TYPE === config.serviceBOMTypes.kit.fieldValue) { 
+                    type = 'kit'; 
+                    let elemKit = insertSparePart(elemKitsParts, bomPart, 'kit');
+                    elemComponents = insertSparePartComponents(elemKit);
+                } else if(bomPart.level === 1 && bomPart.details.TYPE === config.serviceBOMTypes.offering.fieldValue) { 
+                    type = 'offering'; 
+                    let elemOffering = insertSparePart(elemOfferingParts, bomPart, 'offering');
+                    elemComponents = insertSparePartComponents(elemOffering);
+                } else if(bomPart.level === 2) {
+                    if(type === 'sparePart') insertSparePart(elemListParts, bomPart, 'sparePart');
+                    else if(type === 'kit') {
+                        listServiceItems.kit.push(bomPart.link);
+                        insertSparePartComponent(elemComponents, bomPart);
+                    }
+                } else if(bomPart.level === 3) {
+                    if(type === 'offering') {
+                        listServiceItems.offering.push(bomPart.link);
+                        insertSparePartComponent(elemComponents, bomPart);
+                    }
                 }
-            } else if(bomPart.level === 3) {
-                if(type === 'offering') {
-                    listServiceItems.offering.push(bomPart.link);
-                    insertSparePartComponent(elemComponents, bomPart);
+
+            }
+
+        } else {
+
+            for(let bomPart of response.data.bomPartsList) {
+                if(bomPart.level === 1) {
+                    insertSparePart(elemContent, bomPart, 'sparePart');
                 }
             }
+
+            $('.spare-part').first().click();
 
         }
 
@@ -1199,20 +830,25 @@ function insertSparePart(elemParent, bomPart, type) {
         .addClass('icon')
         .addClass('filled')
         .addClass(config.serviceBOMTypes[type].icon);
+
+    // $('<img>').attr('src', 'http://localhost:8080/storage/cache/0453.jpg').prependTo(elemSparePartImage);
+
+
+    addTileThumbnail(elemSparePart);
     
-    $.get('/plm/details', { link : bomPart.link }, function(response) {
-        let params = {
-            replace   : true,
-            icon      : config.serviceBOMTypes[type].icon,
-            imageLink : getFirstImageFieldValue(response.data.sections)
-        }
-        $('.spare-part').each(function() {
-            if($(this).attr('data-link') === response.params.link) {
-                let elemImage = $(this).find('.spare-part-image').first();
-                appendImageFromCache(elemImage, {}, params, function() {});
-            }
-        });
-    });
+    // $.get('/plm/details', { link : bomPart.link }, function(response) {
+    //     let params = {
+    //         replace   : true,
+    //         icon      : config.serviceBOMTypes[type].icon,
+    //         imageLink : getFirstImageFieldValue(response.data.sections)
+    //     }
+    //     $('.spare-part').each(function() {
+    //         if($(this).attr('data-link') === response.params.link) {
+    //             let elemImage = $(this).find('.spare-part-image').first();
+    //             appendImageFromCache(elemImage, {}, params, function() {});
+    //         }
+    //     });
+    // });
                 
     let elemSparePartDetails = $('<div></div>').appendTo(elemSparePart)
         .addClass('spare-part-details')
@@ -1396,8 +1032,6 @@ function insertWearParts() {
 //         .addClass('spare-part-image')
 //         .addClass('tile-image');
             
-//     // let linkImage = getFlatBOMCellValue(flatBOM, selectedItem.node.item.link, urnsSpareParts.image);
-
 //     // getImageFromCache(elemSparePartImage, { 'link' : linkImage }, 'settings', function() {});
 
 //     // if(linkImage === '') {
@@ -1850,7 +1484,7 @@ function filterSparePartsByInput() {
 // Serial Number interactions
 function selectSerialNumber(elemClicked) {
 
-let gridRow  =  {
+    let gridRow  =  {
         partNumber   : '',
         path         : '',
         instancePath : ''
@@ -1858,9 +1492,9 @@ let gridRow  =  {
 
     let elemPanel  = elemClicked.closest('.panel-top');
     // let rowData    = getSerialNumberDetails(elemClicked, );
-    let fieldIDs = config.serialNumbers.fieldIDs;
+    let fieldIds = config.fieldIds.serialNumbers;
 
-elemClicked.children().each(function() {
+    elemClicked.children().each(function() {
 
         let elemCell = $(this);
         let fieldId  = elemCell.attr('data-id');
@@ -1869,15 +1503,15 @@ elemClicked.children().each(function() {
 
             switch(fieldId) {
 
-                case fieldIDs.partNumber:
+                case fieldIds.partNumber:
                     gridRow.partNumber = elemCell.children().first().val();
                     break;
 
-                case fieldIDs.path:
+                case fieldIds.path:
                     gridRow.path = elemCell.children().first().val();
                     break;
 
-                case fieldIDs.instancePath:
+                case fieldIds.instancePath:
                     gridRow.instancePath = elemCell.children().first().val();
                     break;
 
@@ -1974,8 +1608,15 @@ function clickSparePart(elemClicked) {
 
     if(applicationFeatures.itemDetails) insertDetails(link, paramsItemDetails);
     if(applicationFeatures.itemAttachments) insertAttachments(link, paramsItemAttachments);
-    viewerSelectModel(partNumber, { 'highlight' : false , 'isolate' : true } );
-    bomDisplayItemByPartNumber(partNumber, true, true);
+
+    if(links.ebom !== '') {
+        viewerSelectModel(partNumber, { 'highlight' : false , 'isolate' : true } );
+        bomDisplayItemByPartNumber(partNumber, true, true);
+    } else {
+        $('.spare-part').removeClass('selected');
+        elemClicked.addClass('selected');
+        insertViewer(link, { features : config.viewerFeatures });
+    }
 
 }
 
@@ -2041,7 +1682,7 @@ function onViewerSelectionChanged(event) {
             elemContext.addClass('selected');
             bomDisplayItem(elemContext);
             setSparePartsList(elemContext);
-            updateTreePath($(this));
+            treeUpdatePath($(this));
             updateRelatedPanels(linkItem);           
 
         }
@@ -2129,7 +1770,10 @@ function addCartItem(elemClicked) {
         .attr('data-title', elemSparePart.attr('data-title'))
         .attr('data-type', elemSparePart.attr('data-type'))
         .attr('data-part-number', elemSparePart.attr('data-part-number'))
-        .attr('data-qty', elemSparePart.attr('data-qty'));
+        .attr('data-qty', elemSparePart.attr('data-qty'))
+        .click(function(e) {
+            clickSparePart($(this));
+        });
 
     elemSparePart.find('.spare-part-image'  ).clone().appendTo(elemCartItem);
     elemSparePart.find('.spare-part-details').clone().appendTo(elemCartItem);        
@@ -2163,7 +1807,7 @@ function addCartItem(elemClicked) {
             removeCartItem($(this));
         }); 
 
-     if(applicationFeatures.showStock) {
+    if(applicationFeatures.showStock) {
 
         elemSparePart.find('.spare-part-stock').clone().appendTo(elemCartItemSide); 
 

@@ -16,15 +16,16 @@ block body
             #header-title=title
             #header-subtitle
             #header-toolbar
-                //- #save.button.default Save Changes
-                #open-selector.button.with-icon.icon-search.default Select BOM For Comparison
+                #compare-selected.button.append-icon.hidden(title="Open comparison for selected elements in new tab") Compare Selected
+                #open-selector.button.default Select BOM to compare
                 select#viewer-size.button(style="text-align : left;")
-                    option(value='normal') Normal Viewer Size
+                    option(value='normal') Normal Viewer
                     option(value='large') Large Viewers
                     option(value='small') Small Viewers
                     option(value='float') Floating Viewers
                     option(value='none') No Viewers
                 #toggle-sync-viewers.button.with-toggle.toggle-on Sync Viewers
+                #align-viewers.button(title='Match the position and orientation of the right model to the left model') Align Viewers
                 #toggle-details.button.with-toggle.toggle-off Details Panels
                 //- select#header-filter.button(style="text-align : left;")
                 //-     option(value='all') Show All Items
@@ -83,4 +84,6 @@ block body
                     .label Missing Items
                     .button.icon.icon-prev
                     .button.icon.icon-next
+                .separator
                 .button.with-toggle.toggle-off#apply-colors Apply Colors in Viewer
+                .button.with-toggle.toggle-on#compare-by-number Compare by Position #

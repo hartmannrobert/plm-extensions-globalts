@@ -1,12 +1,13 @@
 const express = require('express');
 const axios   = require('axios');
 const crypto  = require('node:crypto');
+const jwt     = require('jsonwebtoken');
 const router  = express.Router();
 
 
 
 /* ------------------------------------------------------------------------------
-    DEFAULT LANDING PAGE & DOCUMENTATION
+    DEFAULT LANDING PAGE, DOCUMENTATION & MONITORING
    ------------------------------------------------------------------------------ */
 router.get('/', function(req, res, next) {
 
@@ -19,10 +20,17 @@ router.get('/', function(req, res, next) {
         });
     }   
 });
-router.get('/chrome-extension', function(req, res, next) {
+router.get('/docs/chrome-extension', function(req, res, next) {
     if(isServiceDisabled('chrome-extension', req, res)) return;
-    res.render('framework/chrome-extension', {
+    res.render('docs/chrome-extension', {
         title : 'PLM UX Chrome Extension',
+        theme : (typeof req.query.theme === 'undefined') ? req.app.locals.defaultTheme : req.query.theme
+    });
+});
+router.get('/docs/monitoring', function(req, res, next) {
+    if(isServiceDisabled('monitoring', req, res)) return;
+    res.render('docs/monitoring', {
+        title : 'PLM UX Server Monitoring',
         theme : (typeof req.query.theme === 'undefined') ? req.app.locals.defaultTheme : req.query.theme
     });
 });
@@ -54,6 +62,10 @@ router.get('/start', function(req, res, next) {
         theme : (typeof req.query.theme === 'undefined') ? req.app.locals.defaultTheme : req.query.theme
     });
 });
+router.get('/monitoring' , async function(req, res, next) {
+    if(!(await checkPLMSystemAdmin(req, res))) return;
+    launch('framework/monitoring', 'monitoring', 'UX Server Monitoring', req, res, next);
+});
 router.get('/error-loading', function(req, res, next) {
     res.render('framework/error-loading.pug');
 });
@@ -62,143 +74,150 @@ router.get('/error-loading', function(req, res, next) {
 
 /* ------------------------------------------------------------------------------
     CUSTOM APPLICATIONS
-    router.get('/<endpoint>', function(req, res, next) { launch('<pug filename in /views>', '<page title>', req, res, next); });
+    router.get('/<endpoint>', async function(req, res, next) { launch('<pug filename in /views>', '<node in settings file>', '<page title>', req, res); });
    ------------------------------------------------------------------------------ */
-//    router.get('/template', function(req, res, next) { launch('custom/template', 'App Title', req, res, next); });
+//    router.get('/template', async function(req, res, next) { launch('custom/template', 'custom', 'App Title', req, res); });
 
 
 
 /* ------------------------------------------------------------------------------
     STANDARD APPLICATIONS
    ------------------------------------------------------------------------------ */
-router.get('/abom'          , function(req, res, next) { launch('apps/abom'          , 'abom'          , 'Asset BOM Editor'         , req, res, next); });
-router.get('/classes'       , function(req, res, next) { launch('apps/classes'       , 'classes'       , 'Classification Browser'   , req, res, next); });
-router.get('/client'        , function(req, res, next) { launch('apps/client'        , ''              , 'Mobile PLM Client'        , req, res, next); });
-router.get('/compare'       , function(req, res, next) { launch('apps/compare'       , 'compare'       , 'BOM Comparison'           , req, res, next); });
-router.get('/dashboard'     , function(req, res, next) { launch('apps/dashboard'     , 'dashboard'     , 'Dashboard'                , req, res, next); });
-router.get('/explorer'      , function(req, res, next) { launch('apps/explorer'      , 'explorer'      , 'Product Data Explorer'    , req, res, next); });
-router.get('/impactanalysis', function(req, res, next) { launch('apps/impactanalysis', 'impactanalysis', 'Change Impact Analysis'   , req, res, next); });
-router.get('/instances'     , function(req, res, next) { launch('apps/instances'     , 'instances'     , 'BOM Instances Editor'     , req, res, next); });
-router.get('/mbom'          , function(req, res, next) { launch('apps/mbom'          , 'mbom'          , 'Manufacturing BOM Editor' , req, res, next); });
-router.get('/navigator'     , function(req, res, next) { launch('apps/navigator'     , ''              , 'Workspace Navigator'      , req, res, next); });
-router.get('/portal'        , function(req, res, next) { launch('apps/portal'        , 'portal'        , 'PLM Portal'               , req, res, next); });
-router.get('/portfolio'     , function(req, res, next) { launch('apps/portfolio'     , 'portfolio'     , 'Product Portfolio Catalog', req, res, next); });
-router.get('/projects'      , function(req, res, next) { launch('apps/projects'      , 'projects'      , 'Projects Dashboard'       , req, res, next); });
-router.get('/reports'       , function(req, res, next) { launch('apps/reports'       , 'reports'       , 'Reports Dashboard'        , req, res, next); });
-router.get('/reviews'       , function(req, res, next) { launch('apps/reviews'       , 'reviews'       , 'Design Reviews'           , req, res, next); });
-router.get('/sbom'          , function(req, res, next) { launch('apps/sbom'          , 'sbom'          , 'Service BOM Editor'       , req, res, next); });
-router.get('/service'       , function(req, res, next) { launch('apps/service'       , 'service'       , 'Services Portal'          , req, res, next); });
-router.get('/variants'      , function(req, res, next) { launch('apps/variants'      , 'variants'      , 'Variants Manager'         , req, res, next); });
+router.get('/abom'          , async function(req, res, next) { launch('apps/abom'          , 'abom'          , 'Asset BOM Editor'         , req, res, next); });
+router.get('/classes'       , async function(req, res, next) { launch('apps/classes'       , 'classes'       , 'Classification Browser'   , req, res, next); });
+router.get('/client'        , async function(req, res, next) { launch('apps/client'        , ''              , 'Mobile PLM Client'        , req, res, next); });
+router.get('/compare'       , async function(req, res, next) { launch('apps/compare'       , 'compare'       , 'BOM Comparison'           , req, res, next); });
+router.get('/dashboard'     , async function(req, res, next) { launch('apps/dashboard'     , 'dashboard'     , 'Dashboard'                , req, res, next); });
+router.get('/editor'        , async function(req, res, next) { launch('apps/editor'        , 'editor'        , 'Requirements Editor'      , req, res, next); });
+router.get('/explorer'      , async function(req, res, next) { launch('apps/explorer'      , 'explorer'      , 'Product Data Explorer'    , req, res, next); });
+router.get('/impactanalysis', async function(req, res, next) { launch('apps/impactanalysis', 'impactanalysis', 'Change Impact Analysis'   , req, res, next); });
+router.get('/instances'     , async function(req, res, next) { launch('apps/instances'     , 'instances'     , 'BOM Instances Editor'     , req, res, next); });
+router.get('/mbom'          , async function(req, res, next) { launch('apps/mbom'          , 'mbom'          , 'Manufacturing BOM Editor' , req, res, next); });
+router.get('/navigator'     , async function(req, res, next) { launch('apps/navigator'     , ''              , 'Workspace Navigator'      , req, res, next); });
+router.get('/portal'        , async function(req, res, next) { launch('apps/portal'        , 'portal'        , 'PLM Portal'               , req, res, next); });
+router.get('/portfolio'     , async function(req, res, next) { launch('apps/portfolio'     , 'portfolio'     , 'Product Portfolio Catalog', req, res, next); });
+router.get('/projects'      , async function(req, res, next) { launch('apps/projects'      , 'projects'      , 'Projects Dashboard'       , req, res, next); });
+router.get('/reports'       , async function(req, res, next) { launch('apps/reports'       , 'reports'       , 'Reports Dashboard'        , req, res, next); });
+router.get('/reviews'       , async function(req, res, next) { launch('apps/reviews'       , 'reviews'       , 'Design Reviews'           , req, res, next); });
+router.get('/sbom'          , async function(req, res, next) { launch('apps/sbom'          , 'sbom'          , 'Service BOM Editor'       , req, res, next); });
+router.get('/service'       , async function(req, res, next) { launch('apps/service'       , 'service'       , 'Service Portal'           , req, res, next); });
+router.get('/variants'      , async function(req, res, next) { launch('apps/variants'      , 'variants'      , 'Variants Manager'         , req, res, next); });
 
 
 
 /* ------------------------------------------------------------------------------
     ADMINISTRATION UTILITIES
    ------------------------------------------------------------------------------ */
-router.get('/data'            , function(req, res, next) { launch('admin/data'            , ''        , 'Data Manager'             , req, res, next); });
-router.get('/insights'        , function(req, res, next) { launch('admin/insights'        , 'insights', 'Tenant Insights Dashboard', req, res, next); });
-router.get('/outstanding-work', function(req, res, next) { launch('admin/outstanding-work', ''        , 'Outstanding Work Report'  , req, res, next); });
-router.get('/shortcuts'       , function(req, res, next) { launch('admin/shortcuts'       , ''        , 'Admin Shortcuts Panel'    , req, res, next); });
-router.get('/users'           , function(req, res, next) { launch('admin/users'           , ''        , 'User Settings Manager'    , req, res, next); });
-router.get('/comparison'      , function(req, res, next) { launch('admin/comparison'      , ''        , 'Tenant Comparison'        , req, res, next); });
+router.get('/data'            , async function(req, res, next) { launch('admin/data'            , ''        , 'Data Manager'             , req, res, next); });
+router.get('/insights'        , async function(req, res, next) { launch('admin/insights'        , 'insights', 'Tenant Insights Dashboard', req, res, next); });
+router.get('/outstanding-work', async function(req, res, next) { launch('admin/outstanding-work', ''        , 'Outstanding Work Report'  , req, res, next); });
+router.get('/shortcuts'       , async function(req, res, next) { launch('admin/shortcuts'       , ''        , 'Admin Shortcuts Panel'    , req, res, next); });
+router.get('/users'           , async function(req, res, next) { launch('admin/users'           , ''        , 'User Settings Manager'    , req, res, next); });
+router.get('/comparison'      , async function(req, res, next) { launch('admin/comparison'      , ''        , 'Tenant Comparison'        , req, res, next); });
 
 
 
 /* ------------------------------------------------------------------------------
     Vault & INVENTOR ADDINS
    ------------------------------------------------------------------------------ */
-router.get('/addins/similar'            , function(req, res, next) { launch('addins/similar'            , 'addins', 'Similar Items'      , req, res, next); });
-router.get('/addins/item-classification', function(req, res, next) { launch('addins/item-classification', 'addins', 'Item Classification', req, res, next); });
-router.get('/addins/context'            , function(req, res, next) { launch('addins/context'            , 'addins', 'Context Browser'    , req, res, next); });
-router.get('/addins/item'               , function(req, res, next) { launch('addins/item'               , 'addins', 'Item Master'        , req, res, next); });
-router.get('/addins/login'              , function(req, res, next) { launch('addins/login'              , 'addins', 'Autodesk Login'     , req, res, next); });
-router.get('/addins/pdm-search'         , function(req, res, next) { launch('addins/pdm-search'         , 'addins', 'PDM Search'         , req, res, next); });
-router.get('/addins/projects'           , function(req, res, next) { launch('addins/projects'           , 'addins', 'PLM Projects'       , req, res, next); });
-router.get('/addins/tasks'              , function(req, res, next) { launch('addins/tasks'              , 'addins', 'My Tasks'           , req, res, next); });
+router.get('/addins/similar'            , async function(req, res, next) { launch('addins/similar'            , 'addins', 'Similar Items'      , req, res, next); });
+router.get('/addins/item-classification', async function(req, res, next) { launch('addins/item-classification', 'addins', 'Item Classification', req, res, next); });
+router.get('/addins/context'            , async function(req, res, next) { launch('addins/context'            , 'addins', 'Context Browser'    , req, res, next); });
+router.get('/addins/item'               , async function(req, res, next) { launch('addins/item'               , 'addins', 'Item Master'        , req, res, next); });
+router.get('/addins/login'              , async function(req, res, next) { launch('addins/login'              , 'addins', 'Autodesk Login'     , req, res, next); });
+router.get('/addins/pdm-search'         , async function(req, res, next) { launch('addins/pdm-search'         , 'addins', 'PDM Search'         , req, res, next); });
+router.get('/addins/projects'           , async function(req, res, next) { launch('addins/projects'           , 'addins', 'PLM Projects'       , req, res, next); });
+router.get('/addins/tasks'              , async function(req, res, next) { launch('addins/tasks'              , 'addins', 'My Tasks'           , req, res, next); });
 
 
 
 /* ------------------------------------------------------------------------------
     UX DEVELOPERS APPLICATIONS
    ------------------------------------------------------------------------------ */
-router.get('/gallery' , function(req, res, next) { launch('framework/gallery'  , '', 'UX Components Gallery', req, res, next); });
-router.get('/template', function(req, res, next) { launch('tutorial/1-template', '', 'App Template Page'    , req, res, next); });
+router.get('/gallery' , async function(req, res, next) { launch('framework/gallery'  , '', 'UX Components Gallery'     , req, res, next); });
+router.get('/studio'  , async function(req, res, next) { launch('framework/studio'   , '', 'Panel Configuration Studio', req, res, next); });
+router.get('/template', async function(req, res, next) { launch('tutorial/1-template', '', 'App Template Page'         , req, res, next); });
 
 
 
 /* ------------------------------------------------------------------------------
     CUSTOM APPLICATIONS
    ------------------------------------------------------------------------------ */
-router.get('/playground' , function(req, res, next) { launch('custom/playground', '', 'UX Playground', req, res, next); });
+router.get('/playground' , async function(req, res, next) { launch('custom/playground', '', 'UX Playground', req, res, next); });
 
 
 
 /* ------------------------------------------------------------------------------
     APPLICATIONS IN DEVELOPMENT
    ------------------------------------------------------------------------------ */
-router.get('/assets'       , function(req, res, next) { launch('dev/assets'       , '', 'Asset Management'                 , req, res, next); });
-router.get('/browser'      , function(req, res, next) { launch('dev/browser'      , '', 'PLM Browser'                      , req, res, next); });
-router.get('/change'       , function(req, res, next) { launch('dev/change'       , '', 'Change Manager'                   , req, res, next); });
-router.get('/configurator' , function(req, res, next) { launch('dev/configurator' , '', 'Product Configuration Editor'     , req, res, next); });
-router.get('/control'      , function(req, res, next) { launch('dev/control'      , '', 'Remote Device Control'            , req, res, next); });
-router.get('/customer'     , function(req, res, next) { launch('dev/customer'     , '', 'Customer Services'                , req, res, next); });
-router.get('/editor'       , function(req, res, next) { launch('dev/editor'       , '', 'Content Editor'                   , req, res, next); });
-router.get('/matrix'       , function(req, res, next) { launch('dev/matrix'       , '', 'Portfolio Matrix'                 , req, res, next); });
-router.get('/mbom-upgrade' , function(req, res, next) { launch('dev/mbom-upgrade' , '', 'MBOM Upgrade Editor'              , req, res, next); });
-router.get('/pbom'         , function(req, res, next) { launch('dev/pbom'         , '', 'Manufacturing Process Editor'     , req, res, next); });
-router.get('/pdm'          , function(req, res, next) { launch('dev/pdm'          , '', 'Vault Browser'                    , req, res, next); });
-router.get('/pdm-explorer' , function(req, res, next) { launch('dev/pdm-explorer' , '', 'PDM Explorer'                     , req, res, next); });
-router.get('/pnd'          , function(req, res, next) { launch('dev/pnd'          , '', 'Product Data & Processes Explorer', req, res, next); });
-router.get('/resources'    , function(req, res, next) { launch('dev/resources'    , 'resources', 'Resource Allocation'     , req, res, next); });
-router.get('/studio'       , function(req, res, next) { launch('dev/studio'       , '', 'Panel Configuration Studio'       , req, res, next); });
-router.get('/transmittals' , function(req, res, next) { launch('dev/transmittals' , '', 'Transmittals Client'              , req, res, next); });
-router.get('/worklist'     , function(req, res, next) { launch('dev/worklist'     , 'worklist', 'Worklist'                 , req, res, next); });
+router.get('/assets'       , async function(req, res, next) { launch('dev/assets'       , '', 'Asset Management'                 , req, res, next); });
+router.get('/browser'      , async function(req, res, next) { launch('dev/browser'      , '', 'PLM Browser'                      , req, res, next); });
+router.get('/change'       , async function(req, res, next) { launch('dev/change'       , '', 'Change Manager'                   , req, res, next); });
+router.get('/configurator' , async function(req, res, next) { launch('dev/configurator' , '', 'Product Configuration Editor'     , req, res, next); });
+router.get('/control'      , async function(req, res, next) { launch('dev/control'      , '', 'Remote Device Control'            , req, res, next); });
+router.get('/customer'     , async function(req, res, next) { launch('dev/customer'     , '', 'Customer Services'                , req, res, next); });
+router.get('/dpp'          , async function(req, res, next) { launch('dev/dpp'          , '', 'Digital Product Passports'        , req, res, next); });
+router.get('/matrix'       , async function(req, res, next) { launch('dev/matrix'       , 'matrix', 'Matrix'                     , req, res, next); });
+router.get('/mbom-upgrade' , async function(req, res, next) { launch('dev/mbom-upgrade' , '', 'MBOM Upgrade Editor'              , req, res, next); });
+router.get('/mealign'      , async function(req, res, next) { launch('dev/mealign'      , 'mep', 'M/E Alignment'                 , req, res, next); });
+router.get('/mepbom'       , async function(req, res, next) { launch('dev/mepbom'       , 'mep', 'M/E & Process BOM Editor'      , req, res, next); });
+router.get('/pbom'         , async function(req, res, next) { launch('dev/pbom'         , '', 'Process BOM Editor'               , req, res, next); });
+router.get('/pdm'          , async function(req, res, next) { launch('dev/pdm'          , '', 'Vault Browser'                    , req, res, next); });
+router.get('/pdm-explorer' , async function(req, res, next) { launch('dev/pdm-explorer' , '', 'PDM Explorer'                     , req, res, next); });
+router.get('/pnd'          , async function(req, res, next) { launch('dev/pnd'          , '', 'Product Data & Processes Explorer', req, res, next); });
+router.get('/resources'    , async function(req, res, next) { launch('dev/resources'    , 'resources', 'Resource Allocation'     , req, res, next); });
+router.get('/transmittals' , async function(req, res, next) { launch('dev/transmittals' , '', 'Transmittals Client'              , req, res, next); });
+router.get('/worklist'     , async function(req, res, next) { launch('dev/worklist'     , 'worklist', 'Worklist'                 , req, res, next); });
 
       
 
 /* ------------------------------------------------------------------------------
     LAUNCH APPLICATION
    ------------------------------------------------------------------------------ */
-function launch(appURL, appSettings, appTitle, req, res) {
+async function launch(appURL, appSettings, appTitle, req, res) {
 
     if(isServiceDisabled(appURL, req, res)) return;
+    
+    let authorized   = req.session.hasOwnProperty('headers');
+    let runAs        =  '';
+    let useSSA       = false;
 
-    let redirect = false;
-    let refresh  = false;
-    let now      = new Date().getTime();
-
-    if(req.session.hasOwnProperty('headers')) {
-        if(req.session.headers.hasOwnProperty('expires')) {
-            let expires = new Date(req.session.headers.expires).getTime();
-            if(expires > now) {
-                refresh = true;
-            } else {
-                redirect = true;
+    if(appSettings !== '') {
+        if(typeof req.app.locals.applications[appSettings] !== 'undefined') {
+            if(req.app.locals.applications[appSettings] !== null) {
+                runAs  = req.app.locals.applications[appSettings].runAs  || '';
+                useSSA = req.app.locals.applications[appSettings].useSSA || useSSA;
             }
-        } else {
-            redirect = true;
         }
-    } else {
-        redirect = true;
     }
 
-    if(typeof req.session.cache === 'undefined') req.session.cache = [];
+    if(typeof req.session.cache === 'undefined') req.session.cache = [];    
 
-    if(redirect) {
+    if(authorized) {
+        if(!req.session.headers.hasOwnProperty('token')) {
+            authorized = false;
+        }
+    }
 
-        req.session.code_verifier  = base64URLEncode(crypto.randomBytes(32));
-        req.session.code_challenge = base64URLEncode(sha256(req.session.code_verifier));
+    if(authorized) {
+        if(req.session.hasOwnProperty('loginType')) {
+            if(req.session.loginType === '2-legged') {
+                authorized = !useSSA && (runAs !== '');
+            } else if(req.session.loginType === '3-legged') {
+                authorized = !useSSA && (runAs === '');
+            } else if(req.session.loginType === 'ssa') {
+                authorized = useSSA && (runAs === '');
+            }
+        }
+    }    
+  
+    if(authorized) authorized = await ensureFreshToken(req);
 
-        let redirectUri = 'https://developer.api.autodesk.com/authentication/v2/authorize'
-            + '?response_type=code'
-            + '&client_id=' + req.app.locals.clientId
-            + '&redirect_uri=' + encodeURIComponent(req.app.locals.redirectUri)
-            + '&scope=profapi:img-profile:read'
-            + '&code_challenge=' + req.session.code_challenge
-            + '&code_challenge_method=S256'
-            + '&state=' + encodeURIComponent(req.url);
-        
-        res.redirect(redirectUri);
+    if(!authorized) {
+
+        if(useSSA)                 genTokenforSSA(req, res, appURL, appSettings, appTitle);
+        else if(runAs !== '')  loginAsDefinedUser(req, res, appURL, appSettings, appTitle);
+        else                  perform3LeggedLogin(req, res);
 
     } else {
 
@@ -232,32 +251,33 @@ function launch(appURL, appSettings, appTitle, req, res) {
 
         reqHost = reqHost.toLowerCase();
 
-        getVaultId(req, function() {
+        getHubId(req, function() {
 
             console.log(' ');
             console.log('  Launching Application');
             console.log(' --------------------------------------------');
-            console.log('  appURL           = ' + appURL); 
-            console.log('  appTitle         = ' + appTitle); 
-            console.log('  clientId         = ' + req.app.locals.clientId.substring(0, 4) + '...'); 
-            console.log('  redirectUri      = ' + req.app.locals.redirectUri); 
-            console.log('  tenant           = ' + req.app.locals.tenant); 
-            console.log('  tenantLink       = ' + req.app.locals.tenantLink); 
-            console.log('  defaultTheme     = ' + req.app.locals.defaultTheme); 
-            console.log('  vaultGatewayLink = ' + req.app.locals.vaultGatewayLink); 
-            console.log('  vaultName        = ' + req.app.locals.vaultName); 
-            console.log('  vaultId          = ' + req.session.vaultId); 
-            console.log('  theme            = ' + reqTheme); 
-            console.log('  host             = ' + reqHost); 
-            console.log('  wsId             = ' + reqWS); 
-            console.log('  dmsId            = ' + reqDMS); 
-            console.log('  descriptor       = ' + reqDescriptor); 
-            console.log('  language         = ' + reqLanguage); 
-            console.log('  number           = ' + reqNumber); 
-            console.log('  fileId           = ' + reqFileId); 
-            console.log('  type             = ' + reqType); 
-            console.log('  options          = ' + reqOptions); 
-            console.log('  revisionBias     = ' + reqRevisionBias); 
+            console.log('  appURL       = ' + appURL); 
+            console.log('  appTitle     = ' + appTitle); 
+            console.log('  clientId     = ' + req.app.locals.clientId.substring(0, 4) + '...'); 
+            console.log('  redirectUri  = ' + req.app.locals.redirectUri); 
+            console.log('  tenant       = ' + req.app.locals.tenant); 
+            console.log('  tenantLink   = ' + req.app.locals.tenantLink); 
+            console.log('  vaultGateway = ' + req.app.locals.vaultGateway); 
+            console.log('  vaultName    = ' + req.app.locals.vaultName); 
+            console.log('  defaultTheme = ' + req.app.locals.defaultTheme); 
+            console.log('  theme        = ' + reqTheme);
+            console.log('  useSSA       = ' + useSSA); 
+            console.log('  runAs        = ' + runAs); 
+            console.log('  host         = ' + reqHost); 
+            console.log('  wsId         = ' + reqWS); 
+            console.log('  dmsId        = ' + reqDMS); 
+            console.log('  descriptor   = ' + reqDescriptor); 
+            console.log('  language     = ' + reqLanguage); 
+            console.log('  number       = ' + reqNumber); 
+            console.log('  fileId       = ' + reqFileId); 
+            console.log('  type         = ' + reqType); 
+            console.log('  options      = ' + reqOptions); 
+            console.log('  revisionBias = ' + reqRevisionBias); 
             console.log();
 
             let findItem = ((reqNumber !== '') && (reqDMS === ''));
@@ -284,7 +304,6 @@ function launch(appURL, appSettings, appTitle, req, res) {
                     descriptor   : reqDescriptor,
                     number       : reqNumber,
                     fileId       : reqFileId,
-                    vaultId      : req.session.vaultId,
                     language     : reqLanguage,
                     type         : reqType,
                     revisionBias : reqRevisionBias,
@@ -297,9 +316,11 @@ function launch(appURL, appSettings, appTitle, req, res) {
                 });    
                 
             }
+
         });
 
     }
+
 }
 function isServiceDisabled(appURL, req, res) {
 
@@ -316,52 +337,53 @@ function isServiceDisabled(appURL, req, res) {
     return true;
 
 }
-function base64URLEncode(str) {
-    return str.toString('base64')
-        .replace(/\+/g, '-')
-        .replace(/\//g, '_')
-        .replace(/=/g, '');
-}
-function sha256(buffer) {
-    return crypto.createHash('sha256').update(buffer).digest();
-}
 
 
 
 /* ------------------------------------------------------------------------------
-    DETERMINE VAULT ID BASED ON GATEWAY & APS LOGIN
+    DETERMINE APS HUB ID WHEN CONNECTED TO FUSION
    ------------------------------------------------------------------------------ */
-function getVaultId(req, callback) {
+function getHubId(req, callback) {
 
-    if(typeof req.query.vaultId !== 'undefined') {
-        req.session.vaultId = req.query.vaultId;
+    if(!req.app.locals.fusionConnected) {
         callback();
-    } else if((req.app.locals.vaultGatewayLink === '') || (req.app.locals.vaultName === '')) {
-        req.session.vaultId = '';
-        callback();
-    } else if((typeof req.session.vaultId !== 'undefined') && (req.session.vaultId !== '')) {
+    } else if(req.app.locals.hubId !== '') {
         callback();
     } else {
 
         console.log(' ');
-        console.log('  Validating Vault Settings');
+        console.log('  Getting connected Hub ID');
         console.log(' --------------------------------------------');
 
-        let url = req.app.locals.vaultGatewayLink + '/AutodeskDM/Services/api/vault/v2/vaults';
+        let url = req.app.locals.tenantLink + '/api/v3/tenant';
 
-        axios.get(url).then(function(response) {
-            for(let vault of response.data.results) {
-                if(vault.name === req.app.locals.vaultName) {
-                    req.session.vaultId = vault.id;
-                    console.log('  Found Vault ' +  req.app.locals.vaultName + ' with id ' + req.session.vaultId); 
-                    break;
+        axios.get(url, { headers : req.session.headers }).then(function(response) {
+            let forgeId = response.data.forgeId;
+            console.log('  > Tenant ID : ' + forgeId);
+
+            axios.post('https://developer.api.autodesk.com/mfg/v3/graphql/public', { 
+                query : `query CDE_PROPERTIES_GetGQLHubId($dataManagementAPIHubId: ID!) {
+                    hubByDataManagementAPIId(dataManagementAPIHubId: $dataManagementAPIHubId) {
+                        id
+                    }
+                }`,
+                variables : {
+                    dataManagementAPIHubId : forgeId,
                 }
-            }
-            console.log(' ');
-            callback();
+            },{                
+                headers : req.session.headers 
+            }).then(function(response) {
+                req.app.locals.hubId = response.data.data.hubByDataManagementAPIId.id;
+                console.log('  > Hub ID    : ' + req.app.locals.hubId);
+                console.log(' ');
+                callback();
+            }).catch(function(error) {
+                console.log('  !ERROR! Could not determine Hub ID');
+                callback();
+            });
+
         }).catch(function(error) {
-            console.log('  !ERROR! Could not connect to Vault ' +  req.app.locals.vaultName + ' with id ' + req.session.vaultId);
-            req.session.vaultId = '';
+            console.log('  !ERROR! Could not determine Hub ID');
             callback();
         });
 
@@ -374,20 +396,63 @@ function getVaultId(req, callback) {
 /* ------------------------------------------------------------------------------
     CALLBACK & APS LOGIN
    ------------------------------------------------------------------------------ */
-router.get('/callback', function(req, res, next) {
-    
+function perform3LeggedLogin(req, res) {
+ 
+    req.session.code_verifier  = base64URLEncode(crypto.randomBytes(32));
+    req.session.code_challenge = base64URLEncode(sha256(req.session.code_verifier));
+
+    let redirectUri = 'https://developer.api.autodesk.com/authentication/v2/authorize'
+        + '?response_type=code'
+        + '&client_id=' + req.app.locals.clientId
+        + '&redirect_uri=' + encodeURIComponent(req.app.locals.redirectUri)
+        + '&scope=data:read data:search data:write'
+        + '&code_challenge=' + req.session.code_challenge
+        + '&code_challenge_method=S256'
+        + '&state=' + encodeURIComponent(req.url);
+        
+    res.redirect(redirectUri);
+
+}
+router.get('/callback', async function(req, res, next) {
+
     console.log();
     console.log('  /callback START');
     console.log(' --------------------------------------------');
     console.log('  Target URL = ' + req.query.state);
     console.log();
 
-    getToken(req, req.query.code, res, function() {
-        res.redirect(req.query.state);
-    });
+    try {
+
+        await getToken(req, req.query.code);
+        res.redirect(getSafeRedirect(req.query.state));
+
+    } catch(error) {
+
+
+        console.log(error);
+
+        console.log();      
+        console.log('!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!');      
+        console.log('             LOGIN FAILED');
+        console.log('!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!'); 
+        console.log();         
+
+        next(error);
+    }
         
 });
-function getToken(req, code, res, callback) {
+function getSafeRedirect(target) {
+
+    // The state parameter contains the page to open after login. Only local paths are allowed as redirect target
+    // ('/x?y=z'), not '//host', '/\host' or 'https://host', so the callback cannot be used to leave this server
+
+    if(typeof target !== 'string') return '/';
+    if(!/^\/(?![\/\\])[^\x00-\x1f\x7f]*$/.test(target)) return '/';
+
+    return target;
+
+}
+async function getToken(req, code) {
     
     let data = {
         code            : code,
@@ -397,34 +462,105 @@ function getToken(req, code, res, callback) {
         redirect_uri    : req.app.locals.redirectUri
     }
 
-    axios.post('https://developer.api.autodesk.com/authentication/v2/token', data, {
+    return axios.post('https://developer.api.autodesk.com/authentication/v2/token', data, {
         headers : {
             'accept'        : 'application/json',
             'content-type'  : 'application/x-www-form-urlencoded'
         }
-    }).then(function (response) {
+    }).then(async function (response) {
 
-        if (response.status == 200) {               
+        if (response.status == 200) {
+
+            console.log();
+            console.log('  3-legged login to Autodesk Platform Services (APS) successful');
+            console.log();
+
+            req.session.loginType = '3-legged';
+
+            await updateSessionHeaders(req, response.data);
+
+        }
+
+    });
+    
+}
+function base64URLEncode(str) {
+    return str.toString('base64')
+        .replace(/\+/g, '-')
+        .replace(/\//g, '_')
+        .replace(/=/g, '');
+}
+function sha256(buffer) {
+    return crypto.createHash('sha256').update(buffer).digest();
+}
+function updateSessionHeaders(req, data, userId) {
+
+    req.session.headers = {
+        'Content-Type' : 'application/json',
+        Accept         : 'application/json',
+        'X-Tenant'     : req.app.locals.tenant,
+        token          : data.access_token,
+        Authorization  : 'Bearer ' + data.access_token,
+    };
+
+    if(data.expires_in    != null) req.session.headers.expires      = Date.now() + (data.expires_in * 1000);
+    if(data.refresh_token != null) req.session.headers.refreshToken = data.refresh_token;
+    if(userId             != null) req.session.headers['X-user-id'] = userId;
+
+    // Persist immediately, so the new (single-use) refresh token is in the session store before any subsequent request is processed
+
+    return new Promise(function(resolve, reject) {
+        req.session.save(function(error) {
+            if(error) reject(error); else resolve(req.session.headers);
+        });
+    });
+
+}
+
+
+
+/* ------------------------------------------------------------------------------
+    GENERATE TOKEN USING SECURE SERVICE ACCOUNT
+   ------------------------------------------------------------------------------ */
+async function genTokenforSSA(req, res, appURL, appSettings, appTitle) {
+
+    const assertion    = await generateAssertionJWT(req);
+    const clientId     = req.app.locals.adminClientId;
+    const clientSecret = req.app.locals.adminClientSecret;
+    const clientString = clientId + ':' + clientSecret;
+
+    const data = {
+        grant_type : 'urn:ietf:params:oauth:grant-type:jwt-bearer',
+        scope      : 'data:read data:write',
+        assertion  : assertion
+    } 
+
+    axios.post('https://developer.api.autodesk.com/authentication/v2/token', data, {
+        headers : {
+            'content-type'  : 'application/x-www-form-urlencoded',
+            'Authorization' : 'Basic ' + btoa(clientString),
+        } 
+    }).then(function(response) {
+
+        if(response.status == 200) {               
             
             console.log();
-            console.log('  Login to Autodesk Platform Services (APS) successful');
+            console.log('  Login to Autodesk Platform Services (APS) with SSA account successful');
             console.log();
 
-            let expiration = new Date();
-                expiration.setSeconds(expiration.getSeconds() + (response.data.expires_in - 90));
+            req.session.loginType = 'ssa';
 
             req.session.headers = {
-                'Content-Type'  : 'application/json',
-                'Accept'        : 'application/json',
-                'X-Tenant'      : req.app.locals.tenant,
-                'token'         : response.data.access_token,
-                'Authorization' : 'Bearer ' + response.data.access_token,
-                'expires'       : expiration,
-                'refresh_token' : response.data.refresh_token
+                'Content-Type' : 'application/json',
+                Accept         : 'application/json',
+                'X-Tenant'     : req.app.locals.tenant,
+                token          : response.data.access_token,
+                Authorization  : 'Bearer ' + response.data.access_token,
+                expires        : Date.now() + response.data.expires_in * 1000
             };
-            
-            callback();
 
+            launch(appURL, appSettings, appTitle, req, res);
+            
         } else {
 
             console.log();      
@@ -437,15 +573,287 @@ function getToken(req, code, res, callback) {
 
     }).catch(function (error) {
 
-        res.render('framework/error-login', {
-            title   : 'Login Error ' + error.response.status,
-            code    : error.response.status,
-            text    : error.response.data.error
-        });
-
+        console.log(error.response);
 
     });
-    
+
+}
+async function generateAssertionJWT(req) {
+
+    const CONFIG = {
+        APS_CLIENT_ID      : req.app.locals.adminClientId,
+        APS_SECRET_ID      : req.app.locals.adminClientSecret,
+        SERVICE_ACCOUNT_ID : req.app.locals.ssaAccountId,
+        KEY_ID             : req.app.locals.ssaKeyId,
+        PRIVATE_KEY        : req.app.locals.ssaPrivateKey,
+        SCOPE              : ["data:read", "data:write"],
+        TOKEN_URL          : "https://developer.api.autodesk.com/authentication/v2/token"
+    };
+
+    return jwt.sign({
+       iss   : CONFIG.APS_CLIENT_ID,
+       sub   : CONFIG.SERVICE_ACCOUNT_ID,
+       aud   : CONFIG.TOKEN_URL,
+       exp   : Math.floor(Date.now() / 1000) + 300,
+       scope : CONFIG.SCOPE,
+    },
+    CONFIG.PRIVATE_KEY,
+    {
+        algorithm: "RS256",
+        header: { alg: "RS256", kid: CONFIG.KEY_ID },
+    });
+
 }
 
+
+
+/* ------------------------------------------------------------------------------
+    IMPERSONATION FOR RUNAS OPTION
+   ------------------------------------------------------------------------------ */
+function loginAsDefinedUser(req, res, appURL, appSettings, appTitle) {
+
+    const runAs        = req.app.locals.applications[appSettings].runAs;
+    const clientId     = req.app.locals.adminClientId;
+    const clientSecret = req.app.locals.adminClientSecret;
+    const clientString = clientId + ':' + clientSecret;
+
+    const data = {
+        grant_type : 'client_credentials',
+        scope      : 'data:read viewables:read bucket:read code:all',
+    }
+
+    axios.post('https://developer.api.autodesk.com/authentication/v2/token', data, {
+        headers : {
+            'accept'        : 'application/json',
+            'content-type'  : 'application/x-www-form-urlencoded',
+            'Authorization' : 'Basic ' + btoa(clientString),
+        } 
+    }).then(async function(response) {
+
+        if (response.status == 200) {               
+            
+            console.log();
+            console.log('  Login to Autodesk Platform Services (APS) as ' + runAs + ' successful');
+            console.log();
+
+            req.session.loginType = '2-legged';
+
+            await updateSessionHeaders(req, response.data, runAs);            
+
+            launch(appURL, appSettings, appTitle, req, res);
+            
+        } else {
+
+            console.log();      
+            console.log('!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!');      
+            console.log('             LOGIN FAILED');
+            console.log('!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!'); 
+            console.log(); 
+
+        }
+
+    }).catch(function (error) {
+
+        console.log(error);
+
+    });
+
+}
+
+
+
+/* ------------------------------------------------------------------------------
+    RENEW EXPIRED TOKEN FOR ANY LOGIN TYPE (2-legged and SSA have no refresh token,
+    so a new token is requested using the same grant as for the initial login)
+   ------------------------------------------------------------------------------ */
+const tokenRenewals = {};
+async function validatePLMSession(req, res, next) {
+
+    let headers = req.session?.headers;
+
+    if(!headers || !headers.token) return res.status(401).send('PLM login required.');
+
+    if(!(await ensureFreshToken(req))) return res.status(401).send('Session expired.');
+
+    next();
+
+}
+
+async function ensureFreshToken(req) {
+
+    let expires = req.session.headers.expires;
+
+    if(typeof expires === 'undefined' || expires >= (Date.now() + 10000)) return true;
+
+    // concurrent requests of the same session share a single renewal (refresh tokens are single-use)
+    let key = req.sessionID;
+
+    if(!tokenRenewals[key]) {
+        tokenRenewals[key] = renewSessionToken(req).finally(function() { delete tokenRenewals[key]; });
+    }
+
+    let newHeaders = false;
+
+    try { newHeaders = await tokenRenewals[key]; } catch(error) { console.log(error); }
+
+    if(!newHeaders) return false;
+
+    // every concurrent request has its own req.session object, so adopt the renewed headers (already saved to the session store)
+    if(req.session.headers !== newHeaders) req.session.headers = { ...newHeaders };
+
+    return true;
+
+}
+async function renewSessionToken(req) {
+    
+    switch(req.session.loginType) {
+
+        case '3-legged':
+            if(!req.session.headers.refreshToken) return false;
+            return requestTokenRefresh(req);
+
+        case '2-legged':
+            return requestNewAppToken(req, {
+                grant_type : 'client_credentials',
+                scope      : 'data:read viewables:read bucket:read code:all',
+            });
+
+        case 'ssa':
+            return requestNewAppToken(req, {
+                grant_type : 'urn:ietf:params:oauth:grant-type:jwt-bearer',
+                scope      : 'data:read data:write',
+                assertion  : await generateAssertionJWT(req)
+            });
+
+    }
+
+    return false;
+
+}
+async function requestTokenRefresh(req, res) {
+
+    let data = {
+        refresh_token : req.session.headers.refreshToken,
+        grant_type    : 'refresh_token',
+        client_id     : req.app.locals.clientId,
+    }
+
+    return axios.post('https://developer.api.autodesk.com/authentication/v2/token', data, {
+        headers: {
+            'accept'       : 'application/json',
+            'content-type' : 'application/x-www-form-urlencoded'
+        }
+    }).then(async function (response) {
+
+        if (response.status == 200) {
+
+            console.log();
+            console.log('  Token refresh successful');
+            console.log();
+
+            return await updateSessionHeaders(req, response.data);
+            
+        } else {
+
+            console.log();
+            console.log('!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!');
+            console.log('             REFRESH FAILED');
+            console.log('!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!');
+            console.log();
+
+            return false;
+
+        }
+
+    }).catch(function(error) {
+        console.log('  Token refresh failed : ' + (error.response ? JSON.stringify(error.response.data) : error.message));
+        return false;
+    });
+
+}
+async function requestNewAppToken(req, grantData, useSecret) {
+
+    const clientString = req.app.locals.adminClientId + ':' + req.app.locals.adminClientSecret;
+
+    try {
+
+        let response = await axios.post('https://developer.api.autodesk.com/authentication/v2/token', grantData, {
+            headers : {
+                'accept'        : 'application/json',
+                'content-type'  : 'application/x-www-form-urlencoded',
+                'Authorization' : 'Basic ' + btoa(clientString),
+            }
+        });
+
+        return await updateSessionHeaders(req, response.data, req.session.headers['X-user-id']);
+
+    } catch(error) {
+        console.log('  Token renewal failed : ' + (error.response ? JSON.stringify(error.response.data) : error.message));
+        return false;
+    }
+
+}
+
+
+
+/* ------------------------------------------------------------------------------
+    CHECK MEMBERSHIP IN THE Administration [SYSTEM] GROUP (server-side, cached)
+   ------------------------------------------------------------------------------ */
+async function validatePLMSystemAdmin(req) {
+
+    const cacheTTL = 5 * 60 * 1000;
+
+    if(req.session.hasOwnProperty('systemAdminCheck')) {
+        if((Date.now() - req.session.systemAdminCheck.checked) < cacheTTL) {
+            return req.session.systemAdminCheck.isSystemAdmin;
+        }
+    }
+
+    let isSystemAdmin = false;
+
+    try {
+
+        let url      = req.app.locals.tenantLink + '/api/v3/users/@me';
+        let response = await axios.get(url, { headers : req.session.headers });
+        let groups   = response.data.groups || [];
+
+        isSystemAdmin = groups.some(function(group) { return group.shortName === 'Administration [SYSTEM]'; });
+
+    } catch(error) {
+        isSystemAdmin = false;
+    }
+
+    req.session.systemAdminCheck = { checked : Date.now(), isSystemAdmin : isSystemAdmin };
+
+    return isSystemAdmin;
+
+}
+async function checkPLMSystemAdmin(req, res) {
+
+    let authorized = req.session.hasOwnProperty('headers') && req.session.headers.hasOwnProperty('token');
+
+    if(authorized) {
+
+        let isSystemAdmin = await validatePLMSystemAdmin(req);
+
+        if(!isSystemAdmin) {
+
+            res.status(403);
+            res.locals.message = 'Access denied';
+            res.locals.error   = { status : 403, stack : 'The System Monitoring page requires membership in the Administration [SYSTEM] group.' };
+            res.render('framework/error');
+            return false;
+
+        }
+
+    }
+
+    return true;
+
+}
+
+
+
 module.exports = router;
+module.exports.validatePLMSession     = validatePLMSession;
+module.exports.validatePLMSystemAdmin = validatePLMSystemAdmin;

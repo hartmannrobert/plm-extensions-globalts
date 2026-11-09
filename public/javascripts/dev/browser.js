@@ -10,12 +10,11 @@ $(document).ready(function() {
     setUIEvents();
 
     // insertFlatBOM('/api/v3/workspaces/57/items/17149', { ranges : false,  counters : true,
-    //     totals : true, compactDisplay : true,   
     //      filterSelected : true,
     //       filterEmpty:true, 
     //       bomViewName : 'Service', 
     //       viewSelector : true, 
-    //       hideDetails : false, 
+    //       hideTableColumns : false, 
     //       number : true, 
     //       descriptor : true, 
     //       tableHeaders: true,
@@ -316,7 +315,7 @@ function performSearch() {
         fields      : profileSettings.fields,
         openInPLM   : true,
         search      : true,
-        hideDetails : false,
+        hideTableColumns : false,
         multiSelect : true,
         tableHeaders: true,
         descriptor  : true,
@@ -324,7 +323,6 @@ function performSearch() {
         number      : false,
         editable    : true,
         filterEmpty : true,
-        compactDisplay : true,
         filterSelected : true,
         counters    : true,
         totals  : false

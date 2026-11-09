@@ -3,6 +3,8 @@ let dataItemVersions      = [];
 let links                 = {};
 let bomFinishedLoading    = {};
 let syncScrollBOM         = '';
+let comparisonKey         = 'data-level-path';
+let comparisonSplitBy     = '.';
 
 const idViewerLeft   = 'viewerLeft';
 const idViewerRight  = 'viewerRight';
@@ -19,7 +21,7 @@ const classNames     = {
     placeholder       : 'bom-comparison-placeholder'
 }
 
-let paramsDetailsLeft, paramsDetailsRight, paramsBOMRight;
+let paramsDetailsLeft, paramsDetailsRight, paramsBOMLeft, paramsBOMRight;
 
 
 $(document).ready(function() {
@@ -27,13 +29,22 @@ $(document).ready(function() {
     appendOverlay();
     setUIEvents();
 
-    let compareWith = urlParameters.comparewith  || '';
+    let compareBy   = urlParameters.compareby   || 'number';
+    let compareWith = urlParameters.comparewith || '';
     let compareSelf = (compareWith === 'self') ? true : (compareWith === urlParameters.dmsid);
     let requests    = [ 
         $.get('/plm/details', { link : urlParameters.link }),
         $.get('/plm/versions'  , { link : urlParameters.link }) 
     ];
-    
+
+    compareBy = compareBy.toLowerCase();
+
+    if(compareBy === 'partnumber') {
+        comparisonKey     = 'data-number-path';
+        comparisonSplitBy = '|';
+        $('#compare-by-number').addClass('toggle-off').removeClass('toggle-on');
+    } else $('#compare-by-number').removeClass('toggle-off').addClass('toggle-on');
+
     getFeatureSettings('bomcompare', requests, function(responses) {
 
         dataItemVersions         = responses[1];
@@ -61,12 +72,17 @@ $(document).ready(function() {
         paramsDetailsRight    = config.panels.insertDetailsRight;
         paramsDetailsRight.id = idDetailsRight;  
        
-        paramsBOMRight                  = config.panels.insertBOMRight;
-        paramsBOMRight.id               = idBOMRight;
-        paramsBOMRight.collapseContents = true;
-        paramsBOMRight.onClickItem      = function(elemClicked) { clickBOMItem(elemClicked, 'Right'); };
-        paramsBOMRight.afterCompletion  = function(id) { bomFinishedLoading.right = true; afterBOMCompletion(id, idBOMLeft); };   
-        
+        paramsBOMRight                      = config.panels.insertBOMRight;
+        paramsBOMRight.id                   = idBOMRight;
+        paramsBOMRight.collapseContents     = true;
+        paramsBOMRight.treeSortByPartNumber = (compareBy === 'partnumber');
+        paramsBOMRight.onClickItem          = function(elemClicked) { clickBOMItem(elemClicked, 'Right'); };
+        paramsBOMRight.afterCompletion      = function(id) {
+            updateRevisionProperty(id, idBOMRight); 
+            bomFinishedLoading.right = true; 
+            afterBOMCompletion(id, idBOMLeft); 
+        };
+
         insertViewer(urlParameters.link, {
             id            : idViewerLeft,
             viewerId      : 0,
@@ -75,11 +91,16 @@ $(document).ready(function() {
             features      : config.viewerFeatures
         });
         
-        let paramsBOMLeft = config.panels.insertBOMLeft;
-            paramsBOMLeft.id               = idBOMLeft;
-            paramsBOMLeft.collapseContents = true;
-            paramsBOMLeft.onClickItem      = function(elemClicked) { clickBOMItem(elemClicked, 'Left'); };
-            paramsBOMLeft.afterCompletion  = function(id) { bomFinishedLoading.left = true; afterBOMCompletion(id, idBOMRight); };
+        paramsBOMLeft = config.panels.insertBOMLeft;
+        paramsBOMLeft.id                   = idBOMLeft;
+        paramsBOMLeft.collapseContents     = true;
+        paramsBOMLeft.treeSortByPartNumber = (compareBy === 'partnumber');
+        paramsBOMLeft.onClickItem          = function(elemClicked) { clickBOMItem(elemClicked, 'Left'); };
+        paramsBOMLeft.afterCompletion      = function(id) { 
+            updateRevisionProperty(id, idBOMLeft); 
+            bomFinishedLoading.left = true; 
+            afterBOMCompletion(id, idBOMRight); 
+        };
 
         insertBOM(urlParameters.link, paramsBOMLeft);  
 
@@ -118,9 +139,31 @@ $(document).ready(function() {
 
 function setUIEvents() {
 
+    $('#compare-selected').click(function() {
+
+        let elemLeft  = $('#' + idBOMLeft  + '-content').find('.content-item.selected');
+        let elemRight = $('#' + idBOMRight + '-content').find('.content-item.selected');
+
+        if(elemLeft.length  === 0) return;
+        if(elemRight.length === 0) return;
+
+        let dmsIdLeft  =  elemLeft.attr('data-link').split('/').pop();
+        let dmsIdRight = elemRight.attr('data-link').split('/').pop();
+        let url        = document.location.href;
+
+        url = updateURLParameter(url, 'dmsid',       dmsIdLeft,  false);
+        url = updateURLParameter(url, 'compareWith', dmsIdRight, false);
+
+        window.open(url);
+
+
+    });
     $('#toggle-sync-viewers').click(function() {
         $(this).toggleClass('toggle-on').toggleClass('toggle-off');
         viewersSyncDisabled = $(this).hasClass('toggle-off');
+    });
+    $('#align-viewers').click(function() {
+        alignRightViewer();
     });
     $('#toggle-details').click(function() {
         $('body').toggleClass('no-details-panels');
@@ -171,6 +214,11 @@ function setUIEvents() {
         } else applyViewerColors();
     });
 
+    $('#compare-by-number').click(function() {
+        $(this).toggleClass('toggle-on').toggleClass('toggle-off');
+        toggleComparisonMode();
+    });
+
 }
 
 
@@ -213,10 +261,25 @@ function openComparisonItem(link) {
 }
 
 
+// Enable comparison of revision based on property instead of PLM item revision value
+function updateRevisionProperty(id, idBOM) {
+
+    if(settings[id].revisionFieldId == null) return;
+    if(settings[id].revisionFieldId ===  '') return;
+
+    const elemTop   = $('#' + idBOM);
+    const className = '.tree-column-' + settings[id].revisionFieldId.toLowerCase();
+
+    elemTop.find(className).addClass('tree-column-revision');
+
+}
+
+
+
 // Once both BOMs finished loading, start comparison
 function afterBOMCompletion(id, idOther) {
 
-    $('#' + id + '-action-expand-all').click(function() { expandAllNodes(idOther); });
+    $('#' + id + '-action-expand-all'  ).click(function() { expandAllNodes(idOther);   });
     $('#' + id + '-action-collapse-all').click(function() { collapseAllNodes(idOther); });
 
     if(bomFinishedLoading.left  === false) return;
@@ -240,8 +303,15 @@ function compareBOMs() {
 }
 function compareBOMRow(elemSource, elemTarget) {
 
-    let levelSource = elemSource.attr('data-level-path');
-    let levelTarget = elemTarget.attr('data-level-path');
+    let levelSource = elemSource.attr(comparisonKey);
+    let levelTarget = elemTarget.attr(comparisonKey);
+
+    if(comparisonSplitBy === '|') {
+
+        levelSource = levelSource.slice(levelSource.indexOf(comparisonSplitBy) + 1);
+        levelTarget = levelTarget.slice(levelTarget.indexOf(comparisonSplitBy) + 1);
+
+    }
 
     if(levelSource === levelTarget) {
         if(elemSource.attr('data-root-link') === elemTarget.attr('data-root-link')) {
@@ -357,18 +427,17 @@ function getLowerLevel(levelSource, levelTarget) {
     if(typeof levelSource === 'undefined') return 'target';
     if(typeof levelTarget === 'undefined') return 'source';
         
-    let levelsSource = levelSource.split('.');
-    let levelsTarget = levelTarget.split('.');
+    let levelsSource = levelSource.split(comparisonSplitBy);
+    let levelsTarget = levelTarget.split(comparisonSplitBy);
 
     for(let index in levelsSource) {
 
         if(levelsTarget.length > index) {
             
-            let source = Number(levelsSource[index]);
-            let target = Number(levelsTarget[index]);
+            const levelComparison = compareValues(levelsSource[index], levelsTarget[index]);
 
-            if(source < target) return 'source';
-            if(target < source) return 'target';
+            if(levelComparison ===  1) return 'target';
+            if(levelComparison === -1) return 'source';
             
         }
     }
@@ -397,7 +466,6 @@ function insertBOMComparisonPlaceholder(elemReference, elemBefore, elemAfter) {
     if(elemBefore !== null) elemPlaceholder.insertBefore(elemBefore); else elemPlaceholder.insertAfter(elemAfter);
 
 }
-
 
 
 // After comparison, set UI events to sync BOM interactions
@@ -457,6 +525,100 @@ function syncBOMToggles(idSource, idTarget) {
 }
 
 
+// Rotate and move the model in the right viewer so it matches the orientation and position of the model in the left viewer
+function alignRightViewer() {
+
+    const viewerLeft  = getViewerInstance(idViewerLeft );
+    const viewerRight = getViewerInstance(idViewerRight);
+
+    if(viewerLeft  === null || viewerLeft.viewer  === null || !viewerLeft.geometryLoaded ) return;
+    if(viewerRight === null || viewerRight.viewer === null || !viewerRight.geometryLoaded) return;
+
+    const modelLeft  = viewerLeft.viewer.model;
+    const modelRight = viewerRight.viewer.model;
+
+    if(!modelLeft || !modelRight) return;
+
+    // The transformation is calculated only once per model, while its placement is untouched, and then reapplied by further clicks
+    // Measuring a model that already has a placement transform does not return reliable bounds
+    if(typeof modelRight.alignMatrix === 'undefined') {
+
+        // Rotation: map the up/front directions of the right model (which define its home view) onto the ones of the left model
+        const frameLeft  = getViewerModelFrame(viewerLeft.viewer);
+        const frameRight = getViewerModelFrame(viewerRight.viewer);
+        const rotation   = new THREE.Matrix4();
+
+        if(frameLeft.front !== null && frameRight.front !== null) {
+            rotation.copy(getFrameMatrix(frameLeft)).multiply(getFrameMatrix(frameRight).transpose());
+        } else {
+            rotation.makeRotationFromQuaternion(new THREE.Quaternion().setFromUnitVectors(frameRight.up, frameLeft.up));
+        }
+
+        // Translation: the rotated model is measured and then moved to the lower corner of the left model
+        modelRight.setPlacementTransform(rotation);
+
+        const delta = getModelBounds(modelLeft).min.clone().sub(getModelBounds(modelRight).min);
+
+        modelRight.alignMatrix = new THREE.Matrix4().makeTranslation(delta.x, delta.y, delta.z).multiply(rotation);
+        modelRight.alignUp     = frameLeft.up;
+
+    }
+
+    modelRight.setPlacementTransform(modelRight.alignMatrix);
+
+    // The right viewer now works in the coordinate system of the left model
+    viewerRight.viewer.navigation.setWorldUpVector(modelRight.alignUp.clone());
+    viewerRight.viewer.impl.invalidate(true, true, true);
+
+    if(!viewersSyncDisabled) {
+        const navigation = viewerLeft.viewer.navigation;
+        viewerRight.viewer.syncingViewPoint = true;
+        viewerRight.viewer.navigation.setView(navigation.getPosition(), navigation.getTarget());
+        viewerRight.viewer.navigation.setCameraUpVector(navigation.getCameraUpVector());
+    }
+
+}
+function getViewerModelFrame(viewer) {
+
+    const autocam = viewer.autocam;
+    const up      = (autocam && autocam.sceneUpDirection)    ? autocam.sceneUpDirection.clone()    : new THREE.Vector3().fromArray(viewer.model.getUpVector());
+    const front   = (autocam && autocam.sceneFrontDirection) ? autocam.sceneFrontDirection.clone() : null;
+
+    up.normalize();
+
+    // Front must be usable, meaning not parallel to up
+    if(front !== null) {
+        front.sub(up.clone().multiplyScalar(front.dot(up)));
+        if(front.lengthSq() < 1e-6) return { up : up, front : null };
+        front.normalize();
+    }
+
+    return { up : up, front : front };
+
+}
+function getFrameMatrix(frame) {
+
+    const side = new THREE.Vector3().crossVectors(frame.up, frame.front);
+
+    return new THREE.Matrix4().makeBasis(side, frame.up, frame.front);
+
+}
+function getModelBounds(model) {
+
+    const fragments = model.getFragmentList();
+    const box       = new THREE.Box3();
+    const fragBox   = new THREE.Box3();
+
+    for(let i = 0; i < fragments.getCount(); i++) {
+        fragments.getWorldBounds(i, fragBox);
+        box.union(fragBox);
+    }
+
+    return box;
+
+}
+
+
 // BOM selection event
 function clickBOMItem(elemClicked, side) {
 
@@ -467,6 +629,7 @@ function clickBOMItem(elemClicked, side) {
     const idBOMOther = (side === 'Left') ? idBOMRight : idBOMLeft;
     const fitLeft    = (side === 'Left')  || (!syncView);
     const fitRight   = (side === 'Right') || (!syncView);
+    const usePaths   = common.viewer.cacheInstances || false;
 
     $('.tree-item').removeClass('selected');
 
@@ -475,8 +638,8 @@ function clickBOMItem(elemClicked, side) {
         let elemOther = $('#' + idBOMOther).find('.content-item:eq(' + index + ')');
         let linkLeft  = link;
         let linkRight = link;
-        let pathLeft  = elemClicked.attr('data-number-path');
-        let pathRight = elemClicked.attr('data-number-path');
+        let pathLeft  = (usePaths) ? elemClicked.attr('data-number-path') : elemClicked.attr('data-part-number');
+        let pathRight = (usePaths) ? elemClicked.attr('data-number-path') : elemClicked.attr('data-part-number');
 
         elemClicked.addClass('selected');
 
@@ -484,33 +647,44 @@ function clickBOMItem(elemClicked, side) {
 
             viewerSelectModel(pathLeft, {
                 id      : idViewerLeft,
-                usePath : true
+                usePath : usePaths
             });   
 
         } else {
 
             if(side === 'Left') {
                 linkRight = elemOther.attr('data-link');
-                pathRight = elemOther.attr('data-number-path');
+                pathRight = (usePaths) ? elemOther.attr('data-number-path') : elemOther.attr('data-part-number');
             } else {
                 linkLeft = elemOther.attr('data-link');
-                pathLeft = elemOther.attr('data-number-path');
+                pathLeft = (usePaths) ? elemOther.attr('data-number-path') : elemOther.attr('data-part-number');
             }
 
-
             elemOther.addClass('selected');
+            treeUpdatePath(elemOther);
 
-            viewerSelectModel(pathLeft, {
-                id        : idViewerLeft,
-                fitToView : fitLeft,
-                usePath   : true,
-            });
+            if(typeof pathLeft === 'undefined') {
+                viewerHideAll({ id : idViewerLeft });
+            } else {
+                viewerSelectModel(pathLeft, {
+                    id        : idViewerLeft,
+                    fitToView : fitLeft,
+                    usePath   : usePaths,
+                });
+            }
 
-            viewerSelectModel(pathRight, {
-                id        : idViewerRight,
-                fitToView : fitRight,
-                usePath   : true,
-            });
+            if(typeof pathRight === 'undefined') {
+                viewerHideAll({ id : idViewerRight });
+            } else {
+                viewerSelectModel(pathRight, {
+                    id        : idViewerRight,
+                    fitToView : fitRight,
+                    usePath   : usePaths,
+                });
+                if(typeof pathLeft !== 'undefined') {
+                    $('#compare-selected').removeClass('hidden');
+                }
+            }
 
             insertDetails(linkLeft , paramsDetailsLeft);
             insertDetails(linkRight, paramsDetailsRight);
@@ -518,10 +692,12 @@ function clickBOMItem(elemClicked, side) {
         }
 
     } else {
+        $('#compare-selected').addClass('hidden');
         insertDetails(links.left , paramsDetailsLeft);
         insertDetails(links.right, paramsDetailsRight);
         viewerResetSelection({ id : idViewerLeft  });
         viewerResetSelection({ id : idViewerRight });
+        applyViewerColors();
     }
 
 }
@@ -719,5 +895,50 @@ function applyViewerColors() {
         color       : colors.vectors.red,
         resetColors : false
     });
+
+}
+
+
+// Toggle comparison mode (number or part number)
+function toggleComparisonMode() {
+
+    const elemToggle = $('#compare-by-number');
+
+    if(elemToggle.hasClass('toggle-on')) {
+        compareBy         = 'number';
+        comparisonKey     = 'data-level-path';
+        comparisonSplitBy = '.';
+        paramsBOMLeft.treeSortByPartNumber  = false;
+        paramsBOMRight.treeSortByPartNumber = false;
+    } else {
+        compareBy         = 'partnumber';
+        comparisonKey     = 'data-number-path';
+        comparisonSplitBy = '|';
+        paramsBOMLeft.treeSortByPartNumber  = true;
+        paramsBOMRight.treeSortByPartNumber = true;
+    }
+
+    redrawBOM(idBOMLeft,  idViewerLeft );
+    redrawBOM(idBOMRight, idViewerRight);
+
+    compareBOMs();
+    setBOMComparisonEvents();
+
+}
+function redrawBOM(idBOM, idViewer) {
+
+    if(compareBy === 'partnumber') {
+        sortArray(settings[idBOM].bomPartsList, 'path');
+    } else {
+        sortArray(settings[idBOM].bomPartsList, 'numberPath', 'level');
+    }
+
+    let elemTableLeft = $('#' + idBOM + '-table');
+        elemTableLeft.html('');
+
+    genBOMHeaders(idBOM, elemTableLeft);  
+    genBOMRows(idBOM, elemTableLeft, settings[idBOM].bomPartsList);
+
+    viewerResetSelection({ id : idViewer });
 
 }

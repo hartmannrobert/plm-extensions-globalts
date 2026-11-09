@@ -68,6 +68,7 @@ body.mode-all #comparison-contents { display : block; }
 
 /* CONSOLE */
 /* ----------------------------------------------------------------------------- */
+#console-toggle { top : 0px !important; }
 #console-toggle::before { content : '\e5cc'; }
 body.no-console #console-toggle::before { content : '\e5cb'; }
 body.dark-theme #console-toggle { background : var(--color-surface-level-5); }
@@ -110,52 +111,66 @@ body.dark-theme #console-toggle:hover { background : var(--color-surface-level-4
     flex-direction : column;
     gap            : 12px;
     line-height    : 18px;
+    opacity        : 0.7;
     padding-right  : var(--panel-border-width-h);
     width          : var(--width-comparison-text);
 }
 #comparison-options {
-    display                 : grid;
-    flex-grow               : 1;
-    height                  : calc( var(--height-comparison-controls) - 30px) !important;
-    grid-template-columns   : 110px 1fr 1fr;
-    column-gap              : 12px;
-    row-gap                 : 2px;
-    padding                 : 22px 32px !important;
+    display               : grid;
+    flex-grow             : 1;
+    height                : calc( var(--height-comparison-controls) - 22px) !important;
+    grid-template-columns : 110px 1fr 1fr;
+    column-gap            : 12px;
+    row-gap               : 5px;
+    padding               : 18px 32px 18px !important;
     /* padding-left          : 12px; */
     /* padding-right         : 32px; */
 }
 #comparison-buttons {
-    align-content   : space-evenly;
-    display         : grid;
-    gap             : 2px;
-    height          : calc(var(--height-comparison-controls) - 22px) !important;
-    padding         : 18px 36px !important;
-    white-space     : normal;
-    width           : var(--width-buttons);
+    align-content : space-evenly;
+    display       : grid;
+    gap           : 2px;
+    height        : calc(var(--height-comparison-controls) - 22px) !important;
+    padding       : 18px 36px !important;
+    white-space   : normal;
+    width         : var(--width-buttons);
 }
 #comparison-options .header {
-    line-height : 38px;
-    padding-top : 0px;
-    text-align  : center;
-    overflow    : hidden;
-    white-space : nowrap;
+    height        : 26px;
+    max-height    : 26px;
+    min-height    : 26px;
+    line-height   : 22px;
+    padding-top   : 0px;
+    text-align    : center;
+    overflow      : hidden;
+    white-space   : nowrap;
     text-overflow : ellipsis;
 }
 #comparison-options .label {
-    line-height : 38px;
+    line-height : 37px;
     text-align  : right;
 }
 #comparison-options input {
-    background      : var(--color-surface-level-3);
-    /* border-color    : var(--color-surface-level-3); */
-    height          : 22px;
-    text-align      : center;
-    width           : calc(100% - 16px);
+    background   : var(--color-surface-level-3);
+    border-color : var(--color-blue-500);
+    height       : 20px;
+    text-align   : center;
+    width        : calc(100% - 16px);
 }
 #comparison-options select {
-    height : 38px;
+    height : 36px;
     width  : 100%;
-
+}
+#comparison-options  > .hint {
+    font-size     : 12px;
+    grid-column   : 2 / 4;
+    height        : 30px;
+    line-height   : 32px;
+    opacity       : 0.7;
+    overflow      : hidden;
+    text-align    : center;
+    text-overflow : ellipsis;
+    white-space   : nowrap;
 }
 #comparison-stop {
     background   : var(--color-status-red);
@@ -187,23 +202,23 @@ body.dark-theme #console-toggle:hover { background : var(--color-surface-level-4
 }
 .result-icon {
     font-weight : 200;
-    height      : 38px;
-    line-height : 38px;
+    height      : 30px;
+    line-height : 30px;
     text-align  : center;
     max-width   : 60px;
     min-width   : 60px;
     width       : 60px;
 }
 .result-label { 
-    height      : 38px;
-    line-height : 38px;
+    height      : 30px;
+    line-height : 30px;
     max-width   : 190px;
     min-width   : 190px;
     width       : 190px;
 }
 .result-summary {
     font-size   : 12px;
-    line-height : 38px;
+    line-height : 30px;
     text-align  : right;
     max-width   : 250px;
     min-width   : 250px;
@@ -213,8 +228,8 @@ body.dark-theme #console-toggle:hover { background : var(--color-surface-level-4
     color       : var(--color-surface-level-1);
     padding-right : 10px;
     text-align  : center;
-    height      : 38px;
-    line-height : 38px;
+    height      : 30px;
+    line-height : 30px;
     max-width   : 48px;
     min-width   : 48px;
     width       : 48px;
@@ -227,15 +242,16 @@ body.dark-theme #console-toggle:hover { background : var(--color-surface-level-4
     flex-direction  : column;
     flex-grow       : 1;
     gap             : 1px;
-    max-width       : calc(100% - 606px);    
-    min-width       : calc(100% - 606px);    
-    width           : calc(100% - 606px);    
+    max-width       : calc(100% - 596px);    
+    min-width       : calc(100% - 596px);    
+    width           : calc(100% - 596px);    
 }
 .result-compare {
-    background    : var(--color-surface-level-2);
+    background    : var(--color-surface-level-1);
     display       : none;
+    height        : 30px;
     padding-left  : 8px;
-    padding-right : 2px;
+    padding-right : 0px;
 }
 .action {
     display : flex;
@@ -245,10 +261,12 @@ body.dark-theme #console-toggle:hover { background : var(--color-surface-level-4
     background      : var(--color-surface-level-3);
     border-color    : var(--color-surface-level-3);
     border-radius   :  0px;
-    max-width       : calc(100% - 72px);
+    font-size       : 12px;
+    max-width       : calc(100% - 56px);
+    padding         : 4px 12px;
 }
 .action.with-comparison-button > .action-text.button {
-    max-width       : calc(100% - 112px);
+    max-width       : calc(100% - 88px);
 }
 .action-instructions {
     overflow        : hidden;
@@ -258,6 +276,14 @@ body.dark-theme #console-toggle:hover { background : var(--color-surface-level-4
     background    : var(--color-surface-level-4);
     border-color  : var(--color-surface-level-4);
     border-radius : 0px;
+    font-size     : 18px;
+    line-height   : 28px;
+    max-height    : 28px;
+    min-height    : 28px;
+    height        : 28px;
+    max-width     : 28px;
+    min-width     : 28px;
+    width         : 28px;
 }
 .action-text {
     display : flex;
@@ -285,6 +311,17 @@ body.dark-theme #console-toggle:hover { background : var(--color-surface-level-4
 .action-text:hover,
 .action-icon:hover {
     background : var(--color-surface-level-5) !important;
+}
+.icon-compare.button {
+    border-radius : 0px;
+    font-size     : 24px;
+    line-height   : 28px;
+    max-height    : 28px;
+    min-height    : 28px;
+    height        : 28px;
+    max-width     : 28px;
+    min-width     : 28px;
+    width         : 28px;
 }
 
 
@@ -321,10 +358,10 @@ body.dark-theme #console-toggle:hover { background : var(--color-surface-level-4
 .comparison-contents-table {
     overflow : auto;
     position : absolute;
-    top : 62px;
-    right : 0px;
-    bottom : 0px;
-    left : 0px;
+    top      : 58px;
+    right    : 0px;
+    bottom   : 0px;
+    left     : 0px;
 }
 .comparison-contents-toolbar {
     display  : flex;
@@ -346,8 +383,7 @@ body.dark-theme #console-toggle:hover { background : var(--color-surface-level-4
     justify-content: end;
 }
 .comparison-contents-filters > select {
-    
-    height : 38px;
+    height : 34px;
 }
 #comparison-contents td {
     overflow      : hidden;
@@ -388,6 +424,7 @@ td.exists > div.target::before { content : '\e5ca'; }
 td.exists > div.icon-compare {
     font-size   : 20px;
     line-height : 24px;
+    min-height  : 24px;
     height      : 24px;
     max-width   : 24px;
     min-width   : 24px;
@@ -509,7 +546,7 @@ td.exists > div.icon-compare {
         width         : 330px;
         padding-right : var(--panel-border-width-h);
     }
-    #comparison-options { padding : 22px 18px !important; }
+    #comparison-options { padding : 18px 18px 18px !important; }
     #comparison-buttons { padding : 18px 18px !important; }
     
     #comparison-results  { top : 240px; }

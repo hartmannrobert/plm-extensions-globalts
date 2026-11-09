@@ -75,25 +75,9 @@ function setUIEvents() {
             getWorkspaces('source');
         }
     });
-    $('#comparison-options input').keyup(function (e) {
-        let elemInput = $(this);
-        let value     = elemInput.val();
-        let id        = (elemInput.attr('id') === 'source-tenant') ? 'source' : 'target';
-        setTimeout(function() {
-            if(value === elemInput.val()) {
-                getWorkspaces(id);
-            };
-        }, 2000);
-    });
     $('#target-tenant').keydown(function (e) {
         if (e.keyCode == 13) {
             getWorkspaces('target');
-            $('.result-summary').html('');
-            $('.result-actions').html('');
-            $('.result-compare').hide();
-            $('#comparison-results').children().each(function() {
-                $(this).removeClass('match').removeClass('info').removeClass('diff').removeClass('varies').removeClass('disabled');
-            });
         }
     });
 
@@ -358,49 +342,61 @@ async function saveFile(fileHandler, fileName, fileContent) {
 // Set workspace selectors for both tenants
 function getWorkspaces(id, callback) {
 
+    $('#comparison-stop').click();
+
     let tenantName = $('#' + id + '-tenant').val();
-    
+
     if(tenantName === '') return;
-    
+
     $('#' + id + '-workspaces').attr('disabled', true).addClass('disabled');
     $('#overlay').show();
+    $('#message').hide();
 
     let elemSelect = $('#' + id + '-workspaces');
         elemSelect.children().remove();
 
     $.get('/plm/workspaces', { tenant : tenantName }, function(response) {
 
-        if(response.params.tenant !== tenantName) return;
+        if(response.error) {
 
-        $('#overlay').hide();
-        
-        environments[id].workspaces = response.data.items || [];
+            $('#comparison-start').addClass('disabled');
 
-        if(response.error) return;
+            showErrorMessage('Cannot access ' + tenantName, response.message + ' Is the Client ID defined in the environment file whitelisted in ' + tenantName + '?');
 
-        if(id === 'source') {
-           $('<option></option>').appendTo(elemSelect)
-                .attr('value', 'all-workspaces')
-                .html('All Workspaces, Scripts etc.');
-        }
-        
-        $('#' + id + '-workspaces').removeAttr('disabled').removeClass('disabled');
+        } else {
 
-        sortArray(environments[id].workspaces, 'title');
-        
-        for(let workspace of environments[id].workspaces) {
+            if(response.params.tenant !== tenantName) return;
+            
+            environments[id].workspaces = response.data.items || [];
+
+            if(response.error) return;
+
+            if(id === 'source') {
             $('<option></option>').appendTo(elemSelect)
-                .attr('value', workspace.systemName)
-                .html(workspace.title);
+                    .attr('value', 'all-workspaces')
+                    .html('All Workspaces, Scripts etc.');
+            }
+            
+            $('#' + id + '-workspaces').removeAttr('disabled').removeClass('disabled');
+
+            sortArray(environments[id].workspaces, 'title');
+            
+            for(let workspace of environments[id].workspaces) {
+                $('<option></option>').appendTo(elemSelect)
+                    .attr('value', workspace.systemName)
+                    .html(workspace.title);
+            }
+
+            if(id === 'target') $('#comparison-start').removeClass('disabled');
+
+            if(id === 'target') {
+                $('#target-workspaces').val($('#source-workspaces').val());
+            } 
+
         }
 
-        if(id === 'target') $('#comparison-start').removeClass('disabled');
-
-        if(id === 'target') {
-            $('#target-workspaces').val($('#source-workspaces').val());
-        } 
-        
         if( typeof callback !== 'undefined') { callback(); }
+        $('#overlay').hide();
 
     });
 
@@ -507,8 +503,7 @@ function addActionEntry(params) {
 // Launch & stop comparison
 function startComparison() {
 
-    stopped = false;
-
+    stopped   = false;
     timestamp = new Date().getTime();
 
     $('#console-content').html('');
@@ -1868,8 +1863,8 @@ function compareGridTab() {
 
     Promise.all(requests).then(function(responses) {
 
-        let gridSource = (responses[0].data === '') ? [] : responses[0].data.fields;
-        let gridTarget = (responses[1].data === '') ? [] : responses[1].data.fields;
+        let gridSource = (responses[0].data === '') ? [] : ((responses[0].status === 403) ? [] : responses[0].data.fields);
+        let gridTarget = (responses[1].data === '') ? [] : ((responses[1].status === 403) ? [] : responses[1].data.fields);
         let matches    = getGridMatch(gridSource, gridTarget);
 
         $('#summary-grid').html('Fields : ' + gridSource.length);
@@ -1911,6 +1906,9 @@ function getGridMatch(gridSource, gridTarget, logPrefix) {
     }
 
     let index = 1;
+
+    if(typeof gridSource === 'undefined') gridSource = [];
+    if(typeof gridTarget === 'undefined') gridTarget = [];
 
     for(let colTarget of gridTarget) {
         colTarget.hasMatch = false;
@@ -2423,6 +2421,9 @@ function getBOMTabMatch(viewsSource, viewsTarget, logPrefix) {
         fieldsViewsExtra  : false,
         fieldsCount       : 0
     }
+
+    if(!Array.isArray(viewsSource)) viewsSource = [];
+    if(!Array.isArray(viewsTarget)) viewsTarget = [];
 
     for(let viewTarget of viewsTarget) {
         viewTarget.hasMatch = false;
@@ -4269,8 +4270,8 @@ function getAllPicklists(update) {
     $('#comparison-picklists-table').html('');
 
     let requests = [
-        $.get('/plm/picklists', { limit : 1000, tenant : environments.source.tenantName, timestamp : timestamp }),
-        $.get('/plm/picklists', { limit : 1000, tenant : environments.target.tenantName })
+        $.get('/plm/picklists', { limit : 1000, hideAllUsers : true, tenant : environments.source.tenantName, timestamp : timestamp }),
+        $.get('/plm/picklists', { limit : 1000, hideAllUsers : true, tenant : environments.target.tenantName })
     ]
 
     Promise.all(requests).then(function(responses) {
@@ -4670,12 +4671,16 @@ function compareAllWorkspaces(update) {
 
     if(stopped) return;
 
+    const missingSource = $('.row-workspace.missing-base').length;
+    const missingTarget = $('.row-workspace.missing-target').length;
+
     addLogSpacer();
     addLogSeparator();
     addLogEntry('Starting Workspace Comparison', 'head');
     addLogSpacer();
-    addLogEntry($('.row-workspace.missing-base').length + ' workspaces missing in ' + environments.source.tenantName, 'diff');
-    addLogEntry($('.row-workspace.missing-target').length + ' workspaces missing in ' + environments.target.tenantName, 'diff');
+    if(missingSource > 0) addLogEntry(missingSource + ' workspaces missing in ' + environments.source.tenantName, 'diff');
+    if(missingTarget > 0) addLogEntry(missingTarget + ' workspaces missing in ' + environments.target.tenantName, 'diff');
+    else if(missingSource === missingSource) addLogEntry('Workspaces list matches in both tenants');
     addLogSpacer();
 
     compareNextWorkspace(update);
@@ -4731,7 +4736,7 @@ function compareNextWorkspace(update) {
 
             } else {
 
-                addLogEntry('Comparing Workspace of <strong>' + workspace.name + '</strong>', '');
+                addLogEntry('Comparing Workspace <strong>' + workspace.name + '</strong>', '');
 
                 requests = [
                     $.get('/plm/tabs', { link : workspace.source.__self__, tenant : environments.source.tenantName, timestamp : timestamp }),
@@ -4789,9 +4794,9 @@ function compareNextWorkspace(update) {
                     transistions.match  = getWorkflowTransitionsMatch(responses[20].data, responses[21].data, 'TRS: ').all;
 
                     details.count       = responses[3].data.length
-                    grid.count          = (responses[6].data === '') ? 0 : responses[6].data.fields.length;
+                    grid.count          = (responses[6].data === '') ? 0 : ((typeof responses[6].data.fields === 'undefined') ? 0 : responses[6].data.fields.length);
                     managed.count       = responses[8].data.length;
-                    bom.count           = responses[10].data.length;
+                    bom.count           = (!Array.isArray(responses[10].data)) ? 0 : responses[10].data.length;
                     relationships.count = responses[12].data.length;
                     printViews.count    = responses[14].data.links.length;
                     behaviors.count     = responses[16].data.scripts.length;
@@ -4800,7 +4805,8 @@ function compareNextWorkspace(update) {
  
                 } else {
 
-                    grid.count = (responses[2].data === '') ? 0 : responses[2].data.fields.length;
+                    grid.count = (responses[2].data === '') ? 0 : ((typeof responses[2].data.fields === 'undefined') ? 0 : responses[2].data.fields.length);
+                    bom.count  = (responses[4].data === '') ? 0 : ((!Array.isArray(responses[4].data)) ? 0 : responses[4].data.length);
 
                 }
 
@@ -4863,17 +4869,17 @@ function compareNextScript(update) {
 
             if(isBlank(script.source.__self__)) {
 
-                addLogEntry(script.uniqueName + ' missing in ' + environments.source.tenantName, 'diff');
+                addLogEntry('Script ' + script.uniqueName + ' missing in ' + environments.source.tenantName, 'diff');
                 requests.push($.get('/plm/script', { link : script.target.__self__, tenant : environments.target.tenantName, timestamp : timestamp }));
 
             } else if(isBlank(script.target.__self__)) {
 
-                addLogEntry(script.uniqueName + ' missing in ' + environments.target.tenantName, 'diff');
+                addLogEntry('Script ' + script.uniqueName + ' missing in ' + environments.target.tenantName, 'diff');
                 requests.push($.get('/plm/script', { link : script.source.__self__, tenant : environments.source.tenantName, timestamp : timestamp}));
                 
             } else {
                 
-                addLogEntry('Comparing script ' + script.uniqueName, 'notice');
+                addLogEntry('Comparing Script <strong>' + script.uniqueName + '</strong>', 'notice');
                 requests.push($.get('/plm/script', { link : script.target.__self__, tenant : environments.target.tenantName, timestamp : timestamp }));
                 requests.push($.get('/plm/script', { link : script.source.__self__, tenant : environments.source.tenantName, timestamp : timestamp }));
 
@@ -4978,19 +4984,19 @@ function compareNextPicklist(update) {
 
             if(isBlank(picklist.source.uri)) {
 
-                addLogEntry(picklist.name + ' missing in ' + environments.source.tenantName, 'diff');
-                requests.push($.get('/plm/picklist-setup', { link : picklist.target.uri, tenant : environments.target.tenantName, timestamp : timestamp }));
+                addLogEntry('Picklist ' + picklist.name + ' missing in ' + environments.source.tenantName, 'diff');
+                requests.push($.get('/plm/picklist-setup', { id : picklist.target.id, tenant : environments.target.tenantName, timestamp : timestamp }));
 
             } else if(isBlank(picklist.target.uri)) {
 
-                addLogEntry(picklist.name + ' missing in ' + environments.target.tenantName, 'diff');
-                requests.push($.get('/plm/picklist-setup', { link : picklist.source.uri, tenant : environments.source.tenantName, timestamp : timestamp }));
+                addLogEntry('Picklist ' + picklist.name + ' missing in ' + environments.target.tenantName, 'diff');
+                requests.push($.get('/plm/picklist-setup', { id : picklist.source.id, tenant : environments.source.tenantName, timestamp : timestamp }));
                 
             } else {
                 
-                addLogEntry('Comparing picklist ' + picklist.name, 'notice');
-                requests.push($.get('/plm/picklist-setup', { link : picklist.target.uri, tenant : environments.target.tenantName, timestamp : timestamp }));
-                requests.push($.get('/plm/picklist-setup', { link : picklist.source.uri, tenant : environments.source.tenantName, timestamp : timestamp }));
+                addLogEntry('Comparing Picklist <strong>' + picklist.name + '</strong>', 'notice');
+                requests.push($.get('/plm/picklist-setup', { id : picklist.target.id, tenant : environments.target.tenantName, timestamp : timestamp }));
+                requests.push($.get('/plm/picklist-setup', { id : picklist.source.id, tenant : environments.source.tenantName, timestamp : timestamp }));
 
             }
 
@@ -5081,17 +5087,17 @@ function compareNextRole(update) {
 
             if(isBlank(role.source.uri)) {
 
-                addLogEntry(role.name + ' missing in ' + environments.source.tenantName, 'diff');
+                addLogEntry('Role ' + role.name + ' missing in ' + environments.source.tenantName, 'diff');
                 permissions.count = role.target.permissions.permission.length;
 
             } else if(isBlank(role.target.uri)) {
 
-                addLogEntry(role.name + ' missing in ' + environments.target.tenantName, 'diff');
+                addLogEntry('Role ' + role.name + ' missing in ' + environments.target.tenantName, 'diff');
                 permissions.count = role.source.permissions.permission.length;
                 
             } else {
                 
-                addLogEntry('Comparing picklist ' + role.name, 'notice');
+                addLogEntry('Comparing Role <strong>' + role.name + '</strong>', 'notice');
                 permissions.count = role.source.permissions.permission.length;
 
             }
@@ -5111,7 +5117,7 @@ function compareNextRole(update) {
             role.completed = true;
             applyContentFilters('comparison-roles-filters');
             compareNextRole(update);
-        
+
             proceed = false;
             return;
 
@@ -5123,6 +5129,7 @@ function compareNextRole(update) {
 
     if(proceed) {
         if(update) endComparison(); else endComparison();
+        addLogEnd();
     }
 
 }

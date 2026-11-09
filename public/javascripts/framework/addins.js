@@ -30,7 +30,7 @@ function setAddinEvents() {
                 let number  = message[0].split(':')[1];
 
                 // am 9.2.2ß26 haben wir die absicht besprochen, das messaging zu vereinfachen
-                // es soll nur noch semicolon als trennzeichen verwendete werden
+                // es soll nur noch semicolon als trennzeich©en verwendete werden
                 // wir wollen das mit messaging id verknüpfen
                 // Beispiel
                 //  - action : message[0]
@@ -161,7 +161,7 @@ function genAddinPLMItemTileActions(elemActions) {
         // genAddinTileAction(elemActions, 'gotoVaultItem', 'icon-vault-item' , 'Go To Item'); 
         genAddinTileAction(elemActions, 'openComponent', 'icon-folder-open', 'Open Component');  
         genAddinTileAction(elemActions, 'addComponent' , 'icon-product'    , 'Place Component'); 
-    } else {
+    } else if(host !== '') {
         genAddinTileAction(elemActions, 'gotoVaultFile', 'icon-goto-folder', 'Go To Folder'); 
         genAddinTileAction(elemActions, 'gotoVaultItem', 'icon-vault-item' , 'Go To Item'); 
         genAddinTileAction(elemActions, 'openComponent', 'icon-folder-open', 'Open in CAD'); 
@@ -171,9 +171,12 @@ function genAddinPLMItemTileActions(elemActions) {
 }
 function genAddinTileAction(elemActions, action, icon, tooltip) {
 
-    if(typeof config.hostApplicationActions !== 'undefined') {
-        if(!config.hostApplicationActions[host.toLowerCase()][action]) return;
-    }
+    console.log(config);
+
+    if(typeof config.hostApplicationActions == 'undefined') return;
+    if(isBlank(host)) return;
+    if(!config.hostApplicationActions[host.toLowerCase()][action]) return;
+    
 
     elemActions.addClass('addin-actions');
 

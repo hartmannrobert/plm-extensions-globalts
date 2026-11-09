@@ -1,41 +1,46 @@
 let paramsDetails     = {}
 let paramsAttachments = {}
 let linkSelected      = '';
-let wsConfig          = { workspaceId : '' };
+let wsConfig          = { workspaceId : ''  };
 
 $(document).ready(function() {
     
     setUIEvents();
     insertMenu();
+    showStartupDialog();
 
     wsConfig.workspaceId = config.workspaceId || common.workspaceIds.items;
-    wsConfig.bomViewName = config.panels.insertDetails.bomViewName || common.workspaces.items.defaultBOMView;
+    wsConfig.bomViewName = config.panels.insertBOM.bomViewName || common.workspaces.items.defaultBOMView;
 
     let requests = [
-        $.get('/plm/sections' , { wsId : wsConfig.workspaceId, useCache : config.panels.insertDetails.useCache || true }),
-        $.get('/plm/fields'   , { wsId : wsConfig.workspaceId, useCache : config.panels.insertDetails.useCache || true }),
-        $.get('/plm/bom-views', { wsId : wsConfig.workspaceId, useCache : config.panels.insertBOM.useCache     || true })
+        $.get('/plm/sections'    , { wsId : wsConfig.workspaceId, useCache : true }),
+        $.get('/plm/fields'      , { wsId : wsConfig.workspaceId, useCache : true }),
+        $.get('/plm/bom-views'   , { wsId : wsConfig.workspaceId, useCache : true }),
+        $.get('/plm/is-component', { wsId : wsConfig.workspaceId }),
+        $.get('/services/chrome')
     ];
 
     getFeatureSettings('portal', requests, function(responses) {
 
-        wsConfig.sections = responses[0].data;
-        wsConfig.fields   = responses[1].data;
+        wsConfig.sections    = responses[0].data;
+        wsConfig.fields      = responses[1].data;
+        wsConfig.isComponent = responses[3].data;
+        dataContextMenu      = responses[4];
 
-        getBOMViewDefinition(responses[2].data.bomViews, wsConfig.bomViewName, wsConfig);
+        if(!wsConfig.isComponent) getBOMViewDefinition(responses[2].data.bomViews, wsConfig.bomViewName, wsConfig);
 
-        let paramsSearch = config.panels.insertSearch;
-            paramsSearch.workspacesIn = [wsConfig.workspaceId];
-            paramsSearch.onClickItem  = function(elemClicked) { clickTile(elemClicked); };
+        let paramsSearch = config.panels.insertWorkspaceSearch;
+            paramsSearch.id               = 'search';
+            paramsSearch.tileImageFieldId = paramsSearch.tileImageFieldId || common.workspaces.items.fieldIdImage;
+            paramsSearch.onClickItem      = function(elemClicked) { clickTile(elemClicked); };
 
-        insertSearch(paramsSearch);
+        insertWorkspaceSearch(wsConfig.workspaceId, paramsSearch);
 
-        let paramsRecentItems = config.panels.insertRecentItems;
-            paramsRecentItems.workspacesIn    = [wsConfig.workspaceId];
-            paramsRecentItems.afterCompletion = function(id) { openMostRecentItem(); };
-            paramsRecentItems.onClickItem     = function(elemClicked) { clickTile(elemClicked); };
+        let paramsBookmarks = config.panels.insertBookmarks;
+            paramsBookmarks.workspacesIn    = [wsConfig.workspaceId];
+            paramsBookmarks.onClickItem     = function(elemClicked) { clickTile(elemClicked); };
 
-        insertRecentItems(paramsRecentItems);
+        insertBookmarks(paramsBookmarks);
 
         paramsDetails     = config.panels.insertDetails;
         paramsAttachments = config.panels.insertAttachments;
@@ -115,16 +120,23 @@ function openItem(title) {
 
     $('#main').children().removeClass('hidden');
     $('#header-subtitle').html(title).show();
+    insertContextMenuEntries(linkSelected);
 
     document.title = title; 
+
     insertViewer(linkSelected, {
         extensionsIn : config.viewingFormats || common.viewer.extensionsIncluded,
-        features     : config.viewerFeatures
+        features     : config.viewerFeatures,
+        isComponent  : wsConfig.isComponent
     });
 
-    let paramsBOM = config.panels.insertBOM;
-        paramsBOM.bomViewId = wsConfig.bomViewId;
+    let paramsBOM             = config.panels.insertBOM;
+        paramsBOM.bomViewId   = wsConfig.bomViewId;
+        paramsBOM.isComponent = wsConfig.isComponent;
         paramsBOM.onClickItem = function(elemClicked) { onClickBOMItem(elemClicked); }
+
+    paramsDetails.isComponent = wsConfig.isComponent
+    paramsDetails.useCache = false;
 
     insertDetails(linkSelected, paramsDetails, wsConfig);
     insertAttachments(linkSelected, paramsAttachments);
@@ -135,18 +147,22 @@ function openItem(title) {
 function onClickBOMItem(elemClicked) {
 
     let link = elemClicked.attr('data-link');
-
+    
     if(elemClicked.hasClass('selected')) { 
 
         let partNumber = elemClicked.attr('data-part-number');
-        if(isBlank) partNumber = elemClicked.attr('data-title').split(' - ')[0];
+        let modelId    = elemClicked.attr('data-modelid');
+
+        if(isBlank(partNumber)) partNumber = elemClicked.attr('data-title').split(' - ')[0];
         viewerSelectModel(partNumber, {
             isolate   : true,
             ghosting  : true,
             highlight : true
         });
 
-        insertDetails(link, paramsDetails, wsConfig);
+        if(isBlank(modelId)) insertDetails(link, paramsDetails, wsConfig);
+                        else insertDetails(link, paramsDetails, { modelId : modelId });
+        
         insertAttachments(link, paramsAttachments);
 
     } else {

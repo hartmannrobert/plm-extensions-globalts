@@ -1,509 +1,963 @@
-$(document).ready(function() {
-    
-    appendProcessing('items', false);
-    appendProcessing('item', false);
+let profile          = null;
+let links            = { columns : [] };
+let treePartsList    = [];
+let paramsDetails    = {};
+let paramsCreate     = {};
+let paramsSummary    = {};
+let paramsGridRow    = {};
+let wsConfig         = { updatePicklist : false };
+let countTreeColumns = 0;
 
+
+$(document).ready(async function() {
+        
+    profile = (urlParameters.profile != null) ? config[urlParameters.profile] : config[0];
+    
     setUIEvents();
-    getInitialData();
+    setProfileDefaults();
+    setApplicationLabels();
+
+    links.context = urlParameters.link;
+
+    let requests = [
+        $.get('/plm/details'    , { link : links.context}),
+        $.get('/plm/sections'   , { link : links.context, useCache : true }),
+        $.get('/plm/fields'     , { link : links.context, useCache : true }),
+        $.get('/plm/permissions', { link : links.context, useCache : true }),
+    ]
+
+    getFeatureSettings('matrix', requests, async function(responses) {
+
+        $('#header-subtitle').html(responses[0].data.title);
+
+        links.tree               = getSectionFieldValue(responses[0].data.sections, profile.context.fieldIdTree, '', 'link');
+        wsConfig.contextSections = responses[1].data;
+        
+        let additionalRequests = [];
+        let valueColumns       = getSectionFieldValue(responses[0].data.sections, profile.context.fieldIdColumns, []);
+
+        for(let field of responses[2].data) {
+            let fieldId = field.__self__.split('/').pop();
+            if(fieldId == profile.context.fieldIdColumns) {
+                wsConfig.workspaceId  = field.picklistFieldDefinition.split('/')[4];
+                profile.usedInContext = true;
+                if(hasPermission(responses[3].data, 'edit_items')) {
+                    if(!responses[0].data.itemLocked) {
+                        wsConfig.updatePicklist = true;
+                    }
+                }
+            }
+        }
+
+        if((valueColumns.length === 0) && (!profile.usedInContext)) {
+            valueColumns = await searchColumnItems(responses[0].data.title);
+        } else {
+            for(let valueColumn of valueColumns) {
+                valueColumn.dmsId = String(valueColumn.link.split('/')[6]).padStart(20, '0');
+            }
+        }
+
+        sortArray(valueColumns, 'dmsId', 'integer', profile.columns.sortDirection);
+
+        for(let value of valueColumns) {
+            links.columns.push(value.link);
+            additionalRequests.push($.get('/plm/details', { link : value.link }));
+        }      
+
+        enableCreateButton();
+        
+        let paramsTree = profile.panels.insertBOM;
+            paramsTree.id                 = 'tree';
+            paramsTree.multiSelect        = 'true';
+            paramsTree.additionalRequests = additionalRequests;
+            paramsTree.onClickItem        = function(elemClicked) { onClickTreeItem( elemClicked); };
+            paramsTree.afterCompletion    = function(id, data)    { afterTreeCompleteLoading(id, data); };
+
+        insertBOM(links.tree, paramsTree);
+
+        paramsDetails    = profile.panels.insertDetails || {};
+        paramsDetails.id = 'details';
+
+        insertDetails(links.tree, paramsDetails);
+
+        paramsCreate               = profile.panels.insertCreate || {};
+        paramsCreate.id            = 'create';
+        paramsCreate.getDetails    = true;
+        paramsCreate.afterCreation = function(id, link, data, panelId) { afterCreation(id, link, data, panelId); };
+
+        paramsSummary = profile.panels.insertItemSummary || {};
+        paramsSummary.id              = 'details';
+        paramsSummary.hideCloseButton = true;
+        paramsSummary.summaryLayout   = 'tabs'
+        paramsSummary.summaryContents = profile.panels.summaryContents || [
+            { type : 'details'     },
+            { type : 'grid'        },
+            { type : 'attachments' },
+            { type : 'images', params    : { id : 'item-section-images' , layout : 'grid', contentSize : 'm' } }
+        ];
+
+        paramsGridRow = profile.panels.insertGridRowDetails || {};
+        paramsGridRow.id              = 'details';
+
+    });
 
 });
+async function searchColumnItems(descriptor) {
+
+    if(profile.columns.search == null) return [];
+
+    let paramsSearch = {
+        wsId   : profile.columns.search.workspaceId,
+        fields : [ profile.columns.search.fieldIdContext ],
+        filter : profile.columns.search.additionalFilters || []
+    }
+
+    paramsSearch.filter.push({
+        field      : profile.columns.search.fieldIdContext,
+        type       : 0,
+        comparator : 'is',
+        value      : descriptor
+    });
+
+    let result   = [];
+    let response = await $.post('/plm/search', paramsSearch);
+
+    for(let row of response.data.row) {
+        result.push({
+            link  : '/api/v3/workspaces/' + profile.columns.search.workspaceId + '/items/' + row.dmsId,
+            dmsId : String(row.dmsId).padStart(20, '0')
+        })
+    }
+
+    return result;
+
+}
+
 
 function setUIEvents() { 
 
-    $('#button-toggle-details').click(function() {
-        $('body').toggleClass('with-panel');
+    $('#create-button').click(function() {
+        insertCreate(null, [ wsConfig.workspaceId ], paramsCreate);
+    });
+
+    $('#toggle-details').click(function() {
+        $(this).toggleClass('toggle-on').toggleClass('toggle-off');
+        $('body').toggleClass('no-details');
+    });
+
+    $('#status-bar').children().click(function() {
+        
+        let elemClicked = $(this);
+        
+        elemClicked.siblings().removeClass('active');
+        elemClicked.siblings().removeClass('inactive');
+        elemClicked.removeClass('inactive');
+        
+        if(elemClicked.hasClass('active')) {
+            elemClicked.removeClass('active');
+            $('.content-item').show();
+        } else {
+            $('.content-item').hide();
+            elemClicked.siblings().addClass('inactive');
+            let className = elemClicked.attr('data-class-name');
+            $('.content-item.' + className).each(function() {
+                $(this).show();
+                treeUnhideParents($(this));
+            });
+            elemClicked.addClass('active');
+        }
+        
+    });
+
+}
+function setProfileDefaults() {
+
+    profile.usedInContext         = false;
+    profile.applicationTitle      = profile.labels.applicationTitle   || document.title;
+    profile.latestColumnTitle     = profile.labels.latestColumnTitle  || 'Latest Result';
+    profile.fieldIdColumnTitle    = profile.columns.fieldIds.title    || 'ID';
+    profile.fieldIdColumnSubtitle = profile.columns.fieldIds.subtitle || 'TITLE';
+    profile.columns.fieldIds.sort = profile.columns.fieldIds.sort     || '';
+    profile.columns.sortDirection = profile.columns.sortDirection     || 'descending';
+    profile.statusDefinition      = profile.statusDefinition          || {
+        failure : { type : 'failure', className : 'failure', value : 'Failed'   },
+        missing : { type : 'missing', className : 'missing', value : 'Missing', },
+        pending : { type : 'pending', className : 'pending', value : 'Pending'  },
+        success : { type : 'success', className : 'success', value : 'Success'  },
+        partial : { type : 'partial', className : 'partial', value : 'Conditional Success' },
+    };
+
+    wsConfig.workspaceId = profile.columns.search.workspaceId || '';
+
+}
+function setApplicationLabels() {
+
+    $('#header-title').html(profile.applicationTitle);
+    document.title        = profile.applicationTitle;
+
+    $('#create-button').html(         profile.labels.buttonCreateNew.label || 'Create New');
+    $('#create-button').attr('title', profile.labels.buttonCreateNew.title || 'Click to create new item / column');
+
+}
+function enableCreateButton() {
+    
+    // Enable new process creation only if permissions are granted
+
+    $.get('/plm/permissions', { wsId : wsConfig.workspaceId }, function(response) {
+         if(hasPermission(response.data, 'add_items')) {
+                 if(!profile.usedInContext ) $('#create-button').removeClass('hidden');
+            else if(wsConfig.updatePicklist) $('#create-button').removeClass('hidden');
+        }
     });
 
 }
 
 
-// Retrieve Workspace Details, BOM and details
-function getInitialData() {
+// Insert validation data to table
+function afterTreeCompleteLoading(id, data) {
 
-    let requests = [
-        // $.get('/plm/bom-views-and-fields'   , { 'wsId' : wsId }),
-        $.get('/plm/details'     , { 'wsId' : wsId, 'dmsId' : dmsId }),
-        $.get('/plm/grid'        , { 'wsId' : wsId, 'dmsId' : dmsId }),
-        $.get('/plm/grid-columns', { 'wsId' : wsId })
-    ];
+    treePartsList = data.bomPartsList;
+
+    setStatusBar();
+    insertEditModeToggle();
+    insertColumnToggles();
+    insertLatestColumn();
+    insertSeparatorColumn();
+    sortAndInsertMatrixColumns(data);
+
+}
+function setStatusBar() {
+
+    setStatusBarElement('failure');
+    setStatusBarElement('missing');
+    setStatusBarElement('pending');
+    setStatusBarElement('success');
+
+}
+function setStatusBarElement(id) {
+
+    const elemBar   = $('#status-bar-' + id);
+    const elemLabel = elemBar.find('.status-bar-label');
+
+    elemBar.attr('data-class-name', profile.statusDefinition[id].className);
+    elemLabel.html(profile.statusDefinition[id].value);
+
+}
+function insertEditModeToggle() {
+
+    const elemControls = $('#tree-controls');
+
+    $('<div></div>').prependTo(elemControls)
+        .attr('id', 'tree-toggle-edit-mode')
+        .addClass('button')
+        .addClass('with-toggle')
+        .addClass('toggle-off')
+        .html('Edit Mode')
+        .click(function() {
+            $('body').toggleClass('edit-mode');
+            $(this).toggleClass('toggle-on').toggleClass('toggle-off');
+        });
+
+}
+function insertColumnToggles() {
+
+    const elemControls = $('#tree-controls');
+
+    $('<div></div>').prependTo(elemControls)
+        .addClass('button')
+        .addClass('with-icon')
+        .addClass('icon-plus')
+        .html('Unhide All Columns')
+        .attr('title', 'Click to unhide all matrix columns')
+        .click(function() {
+            $('.matrix-column').removeClass('min');
+        });
+
+    $('<div></div>').prependTo(elemControls)
+        .addClass('button')
+        .addClass('with-icon')
+        .addClass('icon-minus')
+        .html('Hide All Columns')
+        .attr('title', 'Click to hide all matrix columns')
+        .click(function() {
+            $('.matrix-column').addClass('min');
+        });        
+
+}
+function insertLatestColumn() {
+
+    const elemTHead = $('#tree-thead').children().first();
+    
+    $('<th></th>').appendTo(elemTHead)
+        .addClass('matrix-column-latest')
+        .html(profile.latestColumnTitle);
+
+    $('#tree-tbody').find('.content-item').each(function() {
+
+        let elemCell = $('<td></td>').appendTo($(this))
+            .addClass('matrix-column-latest')
+            .click(function(e) {
+                clickLatestColumn(e, $(this));
+            });
+
+        let elemContent = $('<div></div>').appendTo(elemCell).addClass('matrix-cell-content');
+        
+        $('<div></div>').appendTo(elemContent).addClass('matrix-latest-label');
+
+        if($(this).hasClass('leaf')) {
+
+            $('<div></div>').appendTo(elemContent)
+                .addClass('button')
+                .addClass('hidden')
+                .addClass('matrix-button-filter-columns')
+                .attr('title', 'Click to filter for relevant columns')
+                .click(function(e) {
+                    filterMatrixColumns(e, $(this));
+                });
+
+        }
+
+    });    
+
+}
+function clickLatestColumn(e, elemClicked) {
+
+    let link = elemClicked.attr('data-link');
+
+    if(link === '') return;
+
+    e.stopPropagation();
+    e.preventDefault();
+
+    openMatrixColumnDetailsPanel(link);
+
+}
+function openMatrixColumnDetailsPanel(link) {
+
+    let elemToggleDetails = $('#toggle-details');
+    if(elemToggleDetails.hasClass('toggle-off')) elemToggleDetails.click();
+
+    if(settings['details'].link === link) return;
+    insertItemSummary(link, paramsSummary);
+
+}
+function filterMatrixColumns(e, elemClicked) {
+
+    e.preventDefault();
+    e.stopPropagation();
+
+    let wasActive = elemClicked.hasClass('default')
+
+    $('.matrix-button-filter-columns').removeClass('default');;
+    $('.matrix-column').removeClass('hidden');
+
+    if(!wasActive) {
+
+        elemClicked.addClass('default');
+
+        let listDisconnected = elemClicked.closest('td').nextAll('.matrix-status-disconnected');
+
+        listDisconnected.each(function() {
+            let index = $(this).index();
+            $('th.matrix-column').eq(index - countTreeColumns).addClass('hidden');
+            $('#tree-tbody').children().each(function() {
+                $(this).children('.matrix-column').eq(index - countTreeColumns).addClass('hidden');
+            });
+        });
+
+    }
+
+}
+function insertSeparatorColumn() {
+
+    let elemTHead = $('#tree-thead').children().first();
+    
+    $('<th></th>').appendTo(elemTHead).addClass('matrix-column-separator');
+
+    $('#tree-tbody').find('.content-item').each(function() {
+        $('<td></td>').appendTo($(this)).addClass('matrix-column-separator');
+    });    
+
+}
+function sortAndInsertMatrixColumns(data) {
+
+    let requests = [];
+
+    countTreeColumns = $('#tree-thead-row').children().length;
+    links.columns    = [];
+
+    for(let column of data.dataAdditional) {
+        requests.push($.get('/plm/grid', { link : column.params.link }));
+
+    }
+
+    if(profile.columns.fieldIds.sort != null) {
+
+        for(let column of data.dataAdditional) {
+            column.sortValue = getSectionFieldValue(column.data.sections, profile.columns.fieldIds.sort, '');
+        }
+
+        sortArray(data.dataAdditional, 'sortValue', 'string', profile.columns.sortDirection);
+
+    }
 
     Promise.all(requests).then(function(responses) {
 
-        // for(view of responses[0].data) {
-        //     if(view.name === config.explorer.bomViewName) {
-        //         wsItems.viewId = view.id;
-        //         wsItems.viewColumns = view.fields;
-        //     }
-        // }
+        let indexColumn = 0;
 
-        // if(wsItems.viewId === '') showErrorMessage('Error in configuration. Could not find BOM view "' + config.explorer.bomViewName + '"');
-        
-        $('#header-subtitle').html(responses[0].data.title);
+        for(let response of responses) {
 
-        let requestsSub = [];
-        let columns     = responses[2].data;
+            links.columns.push(data.dataAdditional[indexColumn].data.__self__);
 
-        for(row of responses[1].data) {
+            insertMatrixColumn({
+                link     : data.dataAdditional[indexColumn].data.__self__,
+                sections : data.dataAdditional[indexColumn].data.sections,
+                status   : data.dataAdditional[indexColumn].data.currentState.title,
+                locked   : data.dataAdditional[indexColumn].data.itemLocked,
+                grid     : response.data
+            });
 
-            let linkGrid = getGridRowValue(row, 'ITEM', '');
-            //let linkGrid = getGridRowValue(row, 'ITEM', '');
-            // let optionTitle       = getGridRowValue(row, 'TITLE', '');
-            // let optionDescription = getGridRowValue(row, 'DESCRIPTION', '');
-
-            requestsSub.push($.get('/plm/details', { 'link' : linkGrid}) );
-            requestsSub.push($.get('/plm/grid'   , { 'link' : linkGrid}) );
+            indexColumn++;
 
         }
 
-        Promise.all(requestsSub).then(function(responsesSub) {
-            console.log(responsesSub);
-            insertMatrix(columns, responsesSub);
+        updateStatusIndicators();
+
+    });
+
+}
+
+
+// Insert Matrix Columns with Header Actions
+function insertMatrixColumn({ link, sections = [], status = '',  locked = false, grid = [], first = false }) {
+
+    let index     = $('th.matrix-column').length;
+    let elemTHead = $('#tree-thead').children().first();
+    let elemHead  = $('<th></th>').attr('data-index', index)
+        .attr('data-link', link)
+        .addClass('matrix-column')
+        .addClass('matrix-column-' + index)
+        .click(function(e) {
+            clickMatrixColumnHead(e, $(this));
+        });
+        
+    if(first) {
+
+        let elemSeparator = $('th.matrix-column-separator');
+        elemHead.insertAfter(elemSeparator);
+
+    } else elemHead.appendTo(elemTHead);
+
+
+    let elemContent = $('<div></div>').appendTo(elemHead).addClass('matrix-head');
+    let elemLabels  = $('<div></div>').appendTo(elemContent).addClass('matrix-head-labels');
+    let elemActions = $('<div></div>').appendTo(elemContent).addClass('matrix-head-actions');
+
+    const title    = getSectionFieldValue(sections, profile.fieldIdColumnTitle   , '');
+    const subtitle = getSectionFieldValue(sections, profile.fieldIdColumnSubtitle, '');
+
+    $('<div></div>').appendTo(elemLabels).addClass('matrix-head-title'   ).html(title);
+    $('<div></div>').appendTo(elemLabels).addClass('matrix-head-subtitle').html(subtitle);
+    $('<div></div>').appendTo(elemLabels).addClass('matrix-head-status'  ).html(status);
+
+    $('<div></div>').appendTo(elemActions)
+        .addClass('button')    
+        .addClass('icon')    
+        .addClass('icon-minus')
+        .addClass('matrix-hide-column')
+        .attr('title', 'Hide this column')
+        .click(function(e) { clickMatrixColumnToggle(e, $(this), 'hide'); });
+
+    $('<div></div>').appendTo(elemActions)
+        .addClass('button')
+        .addClass('icon')    
+        .addClass('icon-plus')
+        .addClass('matrix-unhide-column')
+        .attr('title', 'Unhide this column')
+        .click(function(e) { clickMatrixColumnToggle(e, $(this), 'unhide'); });
+
+    $('<div></div>').appendTo(elemActions)
+        .addClass('button')    
+        .addClass('icon')    
+        .addClass('icon-filter')
+        .addClass('matrix-filter-rows')
+        .attr('title', 'Filter by this column')
+        .click(function(e) { clickMatrixColumnFilter(e, $(this)); });
+
+    $('#tree-tbody').find('.content-item').each(function() {
+        insertMatrixColumnCell($(this), index, grid, locked, first);
+    });
+
+}
+function clickMatrixColumnHead(e,elemClicked) {
+
+    e.preventDefault();
+    e.stopPropagation();
+
+    const elemHead = elemClicked.closest('th');
+
+    openMatrixColumnDetailsPanel(elemHead.attr('data-link'));
+
+}
+function clickMatrixColumnToggle(e, elemClicked, mode) {
+
+    e.preventDefault();
+    e.stopPropagation();
+
+    const elemHead = elemClicked.closest('th');
+    const index    = elemHead.data('index');
+
+    if(mode === 'hide') $('.matrix-column-' + index).addClass('min');
+                  else  $('.matrix-column-' + index).removeClass('min');
+
+}
+function clickMatrixColumnFilter(e, elemClicked, mode) {
+
+    e.preventDefault();
+    e.stopPropagation();
+
+    const elemHead  = elemClicked.closest('th');
+    const index     = elemHead.data('index');
+    const wasActive = elemClicked.hasClass('active');
+
+    $('.matrix-filter-rows').removeClass('active');
+
+    if(!wasActive) {
+
+        elemClicked.addClass('active');
+        
+        $('.matrix-column').addClass('min');
+        $('.matrix-column-' + index).removeClass('min');
+
+        $('.content-item.leaf').each(function() {
+
+            let elemRow = $(this);
+            let count   = elemRow.children('.matrix-status-connected.matrix-column-' + index).length;
+
+            if(count === 0) {
+                elemRow.hide(); 
+            } else {
+                treeUnhideParents(elemRow);
+                elemRow.show();
+            }
+
+        });
+        
+    } else {
+        
+        $('.matrix-column').removeClass('min');
+        $('.content-item').show();
+
+    }
+
+}
+
+
+// While inserting Matrix Columns insert matching cells per tree row
+function insertMatrixColumnCell(elemRow, index, grid, locked, first) {
+
+    let linkTree = elemRow.attr('data-link');
+    let isNode   = elemRow.hasClass('node');
+    let isLinked = false;
+    let label    = '';
+
+    let elemCell = $('<td></td>')
+        .attr('data-index', index)
+        .addClass('matrix-column')
+        .addClass('matrix-column-' + index)
+        .addClass('matrix-cell')
+        .click(function(e) {
+            clickMatrixColumnCell(e, $(this));
+        });
+        
+    if(first) {
+
+        let elemSeparator = elemRow.find('.matrix-column-separator');
+        elemCell.insertAfter(elemSeparator);
+
+    } else {
+        elemCell.appendTo(elemRow);
+    }
+
+
+    if(isNode) {
+
+        elemCell.addClass('matrix-column-node');
+
+    } else {
+            
+        let elemContent = $('<div></div>').appendTo(elemCell).addClass('matrix-cell-content');
+
+        for(let row of grid) {
+
+            let linkRow = getGridRowValue(row, profile.columns.grid.fieldIdLink);
+
+            if(linkTree === linkRow) { 
+                isLinked = true;
+                elemCell.attr('data-link-grid-row', getGridRowLink(row));
+                label = getGridRowValue(row, profile.columns.grid.fieldIdLabel, '', 'title');
+                break;
+            }
+
+        }
+
+        if(isLinked) elemCell.addClass('matrix-status-connected'); else elemCell.addClass('matrix-status-disconnected');
+
+        if(!locked) {
+
+            elemCell.addClass('matrix-column-editable');
+
+            $('<div></div>').appendTo(elemContent)
+                .addClass('button')
+                .addClass('matrix-cell-action')
+                .addClass('matrix-cell-action-add')
+                .html('Add')
+                .click(function(e) { clickMatrixColumnCellButton(e, $(this), 'add'); });
+                
+            $('<div></div>').appendTo(elemContent)
+                .addClass('button')
+                .addClass('matrix-cell-action')
+                .addClass('matrix-cell-action-remove')
+                .html('Remove')
+                .click(function(e) { clickMatrixColumnCellButton(e, $(this), 'remove'); });
+
+        }
+
+        $('<div></div>').appendTo(elemContent).addClass('matrix-cell-icon');
+        $('<div></div>').appendTo(elemContent).addClass('matrix-cell-label');            
+
+        setMatrixColumnCellStatusClass(elemCell, label);
+
+    }
+
+}
+function clickMatrixColumnCell(e, elemClicked) {
+
+    e.preventDefault();
+    e.stopPropagation();
+
+    let link = elemClicked.attr('data-link-grid-row');
+    
+    if(link == null) return;
+
+    insertGridRowDetails(link, paramsGridRow);
+
+}
+function clickMatrixColumnCellButton(e, elemButton, action) {
+
+    e.preventDefault();
+    e.stopPropagation();
+
+    const elemCell = elemButton.closest('td');
+
+    if(action === 'add') {
+
+        const linkRow    = elemButton.closest('tr.content-item').attr('data-link');
+        const linkColumn = links.columns[elemCell.index() - countTreeColumns];
+
+        let params = {
+            link : linkColumn,
+            data : [{ 
+                fieldId : profile.columns.grid.fieldIdLink, 
+                value   : { link : linkRow } 
+            }]
+        }
+
+        // Set defined default values for new grid entries
+        if(profile.columns.grid.hasOwnProperty('defaults')) {
+            for(let defaultValue of profile.columns.grid.defaults) {
+                params.data.push(defaultValue);
+            }
+        }
+
+        // Copy data from BOM data to defined grid fields
+        if(profile.columns.grid.hasOwnProperty('fieldMapping')) {
+            for(let treeItem of treePartsList) {
+                if(treeItem.link === linkRow) {
+                    for(let fieldMapping of profile.columns.grid.fieldMapping) {
+                        params.data.push({
+                            fieldId : fieldMapping.grid,
+                            value : treeItem.details[fieldMapping.source]
+                        })
+                    }
+                    break;
+                }
+            }
+        }
+
+        $.post('/plm/add-grid-row', params, function(response) {
+            if(!response.error) {
+                elemCell.attr('data-link-grid-row', response.data.split('.autodeskplm360.net')[1]);
+                elemCell.addClass('matrix-status-connected').removeClass('matrix-status-disconnected');
+                setMatrixColumnCellStatusClass(elemCell, profile.statusDefinition.pending.value);
+                updateStatusIndicators();
+            }
+        });
+
+    } else if(action === 'remove') {
+
+        const linkGridRow = elemCell.attr('data-link-grid-row');
+
+        $.post('/plm/remove-grid-row', { link : linkGridRow }, function(response) {
+            if(!response.error) {
+                elemCell.removeClass('matrix-status-connected').addClass('matrix-status-disconnected');
+                setMatrixColumnCellStatusClass(elemCell, '');
+                updateStatusIndicators();
+            }
+        });
+
+    }
+
+}
+function setMatrixColumnCellStatusClass(elemCell, label) {
+
+    let columnStatus = null;
+    let elemIcon     = elemCell.find('.matrix-cell-icon').first();
+    let elemLabel    = elemCell.find('.matrix-cell-label').first();
+
+    elemIcon.html('');
+    elemLabel.html(label);
+
+    switch(label) {
+
+        case profile.statusDefinition.pending.value: columnStatus = profile.statusDefinition.pending; break;
+        case profile.statusDefinition.failure.value: columnStatus = profile.statusDefinition.failure; break;
+        case profile.statusDefinition.success.value: columnStatus = profile.statusDefinition.success; break;
+        case profile.statusDefinition.partial.value: columnStatus = profile.statusDefinition.partial; break;
+
+    }
+
+    elemCell.removeClass(profile.statusDefinition.pending.className);
+    elemCell.removeClass(profile.statusDefinition.failure.className);
+    elemCell.removeClass(profile.statusDefinition.success.className);
+    elemCell.removeClass(profile.statusDefinition.partial.className);
+
+    if(columnStatus !== null) {
+
+        elemCell.addClass(columnStatus.className);
+
+        switch(columnStatus.type) {
+            case 'failure': elemIcon.html('◆'); break;
+            case 'pending': elemIcon.html('●'); break;
+            case 'success': elemIcon.html('■'); break;
+            case 'partial': elemIcon.html('■'); break;
+        }
+
+    }
+
+    return columnStatus;
+
+}
+
+
+// Update table after creation of new item
+function afterCreation(id, link, data, panelId) {
+
+    let listSelected = $('.content-item.leaf.selected');
+    let requests     = [];
+
+    links.columns.unshift(link);
+
+    if(wsConfig.updatePicklist) {
+        $.post('/plm/edit', {
+            link     : links.context,
+            sections : wsConfig.contextSections,
+            fields   : [{
+                fieldId : profile.context.fieldIdColumns,
+                type    : 'multi-select',
+                value   : links.columns
+            }]
+        });
+    }
+
+    listSelected.each(function() {
+
+        let elemSelected = $(this);
+
+        let params       = {
+            link : link,
+            data : [
+                { fieldId : profile.columns.grid.fieldIdLink, value : { link : elemSelected.attr('data-link') } },
+            ]
+        }
+
+        if(profile.columns.grid.hasOwnProperty('defaults')) {
+            for(let defaultValue of profile.columns.grid.defaults) {
+                params.data.push(defaultValue);
+            }
+        }        
+
+        requests.push($.post('/plm/add-grid-row', params));
+
+    });
+
+    Promise.all(requests).then(function(responses) {
+
+        $.get('/plm/grid', { link : link }, function(response) {
+
+            insertMatrixColumn({
+                link     : link,
+                sections : data.sections,
+                subtitle : (data.currentState.title || ''),
+                grid     : response.data,
+                first    : (profile.columns.sortDirection.toLowerCase() === 'descending')
+            });
+
+            updateStatusIndicators();
+
         });
 
 
-        // wsItems.sections            = responses[2].data;
-        // wsItems.fields              = responses[3].data;
-        // wsProblemReports.sections   = responses[4].data;
-        // wsProblemReports.fields     = responses[5].data;
-
-        // if(!isBlank(config.explorer.wsIdSupplierPackages)) {
-        //     wsSupplierPackages.sections = responses[6].data;
-        //     wsSupplierPackages.fields   = responses[7].data;
-        // } else {
-        //     $('#send-selected').remove();
-        // }
-
-        // getBOMData();
-        // setItemDetails('/api/v3/workspaces/' + wsId + '/items/' + dmsId);
-        
-        // editableFields = getEditableFields(wsItems.fields);
-
     });
 
 }
 
 
-function insertMatrix(columns, rows) {
+// Display selected tree item details panel
+function onClickTreeItem(elemClicked) {
 
-    let elemTable = $('#matrix-body');
+    const link       = elemClicked.attr('data-link');
+    const isSelected = elemClicked.hasClass('selected');
 
-    for(let index = 0; index < rows.length; index++) {
+    if(isSelected) insertDetails(link,       paramsDetails);   
+    else           insertDetails(links.tree, paramsDetails);
 
-        let rowHead = rows[index];
-        let brand = getSectionFieldValue(rowHead.data.sections, 'BRAND', '');
-        let elemRowHead = $('<tr></tr>');
-            elemRowHead.appendTo(elemTable);
-
-        let elemRowHeadCell = $('<td></td>');
-            elemRowHeadCell.attr('colspan', '5');
-            elemRowHeadCell.addClass('matrix-head');
-            elemRowHeadCell.html(rowHead.data.title);
-            elemRowHeadCell.appendTo(elemRowHead);
-
-        let elemRowTitles = $('<tr></tr>');
-            elemRowTitles.appendTo(elemTable);
-            elemRowTitles.addClass('matrix-titles');
+}
 
 
-        let elemRowTitle1 = $('<td></td>');
-            elemRowTitle1.html('Item');
-            elemRowTitle1.appendTo(elemRowTitles);
+// Set status column content and style
+function updateStatusIndicators() {
 
-        // let elemRowTitle2 = $('<td></td>');
-        //     elemRowTitle2.html('DE');
-        //     elemRowTitle2.appendTo(elemRowTitles);
 
-        let elemRowTitle3 = $('<td></td>');
-            elemRowTitle3.html('Include');
-            elemRowTitle3.appendTo(elemRowTitles);
+    let statusBarCounters = {
+        failure : 0,
+        missing : 0,
+        pending : 0,
+        success : 0,
+        partial : 0
+    }      
 
-        let elemRowTitle4 = $('<td></td>');
-            elemRowTitle4.html('Print in TIP');
-            elemRowTitle4.appendTo(elemRowTitles);
 
-        let elemRowTitle5 = $('<td></td>');
-            elemRowTitle5.html('Print in DOC');
-            elemRowTitle5.appendTo(elemRowTitles);
+    // Update Tree Leaf Latest Result Column
+    $('#tree-tbody').find('.content-item.leaf').each(function() {
 
-        let elemRowTitle6 = $('<td></td>');
-            elemRowTitle6.html('Brand');
-            elemRowTitle6.appendTo(elemRowTitles);
-            
-        index++;
+        let elemLeaf  = $(this);
+        let listCells = elemLeaf.children('.matrix-column');
+        let status    = null;
+        let index     = null;
 
-        let rowItem = rows[index]
+        listCells.each(function() {
 
-        console.log(rowItem);
+            status = getMatchingStatusByClass($(this));
 
-        for(row of rowItem.data) {
+            if(status !== null) {
+                index = $(this).index() - countTreeColumns;
+                return false;
+            }
 
-            // let name = getGridRowValue(row, 'ITEM', '', 'title');
-            // let itemLink = getGridRowValue(row, 'ITEM', '');
-            let name = getGridRowValue(row, 'PRODUCT', '', 'title');
-            let itemLink = getGridRowValue(row, 'PRODUCT', '');
-            console.log(name);
-            console.log(itemLink);
-        
-            let elemRow = $('<tr></tr>');
-                elemRow.attr('data-link', itemLink);
-                elemRow.appendTo(elemTable);
-                elemRow.click(function() {
-                    selectItem($(this));
-                });
+        });
 
-            let elemRowCell = $('<td></td>');
-                elemRowCell.html(name);
-                elemRowCell.appendTo(elemRow);
+        updateLatestColumn(elemLeaf, status, index);
 
-            let elemRowCellCheck1 = $('<td></td>');
-                elemRowCellCheck1.appendTo(elemRow);
-                elemRowCellCheck1.append(genToggle(''));
+        if(status === null) {
+            statusBarCounters.missing++; 
+            elemLeaf.addClass(profile.statusDefinition.missing.className);
+        } else statusBarCounters[status.type]++;
 
-            // let elemRowCellCheck2 = $('<td></td>');
-            //     elemRowCellCheck2.appendTo(elemRow);
-            //     elemRowCellCheck2.append(genToggle(''));
+    }); 
 
-            let elemRowCellCheck3 = $('<td></td>');
-                elemRowCellCheck3.appendTo(elemRow);
-                elemRowCellCheck3.append(genToggle(''));
 
-            let elemRowCellCheck4 = $('<td></td>');
-                elemRowCellCheck4.appendTo(elemRow);
-                elemRowCellCheck4.append(genToggle(''));
+    // Update Tree Nodes Latest Result Column
+    $('#tree-tbody').find('.content-item.node').each(function() {
 
-            let elemRowCellCheck5 = $('<td></td>');
-                elemRowCellCheck5.html(brand);
-                elemRowCellCheck5.appendTo(elemRow);
+        let elemNode = $(this);
+        let children = treeGetItemChildren(elemNode, false, 'leaf');
+        let counters = {
+            failure : 0,
+            missing : 0,
+            pending : 0,
+            success : 0,
+            partial : 0
+        }
+
+        for(let child of children) {
+
+                 if(child.hasClass(profile.statusDefinition.pending.className)) counters.pending++;
+            else if(child.hasClass(profile.statusDefinition.failure.className)) counters.failure++;
+            else if(child.hasClass(profile.statusDefinition.partial.className)) counters.partial++;
+            else if(child.hasClass(profile.statusDefinition.success.className)) counters.success++;
+            else counters.missing++;
 
         }
 
+        elemNode.removeClass(profile.statusDefinition.failure.className);
+        elemNode.removeClass(profile.statusDefinition.pending.className);
+        elemNode.removeClass(profile.statusDefinition.success.className);
+        elemNode.removeClass(profile.statusDefinition.partial.className);        
+
+             if(counters.failure   > 0) elemNode.addClass(profile.statusDefinition.failure.className);
+        else if(counters.pending   > 0) elemNode.addClass(profile.statusDefinition.pending.className);
+        else if(counters.missing === 0) elemNode.addClass(profile.statusDefinition.success.className);
+        else                            elemNode.addClass(profile.statusDefinition.missing.className);
+
+    }); 
 
 
-    }
+    // Update Status Bar Elements
+    updateStatusBarElement(statusBarCounters, 'failure');
+    updateStatusBarElement(statusBarCounters, 'missing');
+    updateStatusBarElement(statusBarCounters, 'pending');
+    updateStatusBarElement(statusBarCounters, 'success');
 
-}
-
-function genToggle(label) {
-
-    return '<input type="checkbox" id="vehicle1" name="vehicle1" value="Bike"><label for="vehicle1">' + label + '</label>';
-}
-
-
-function selectItem(elemClicked) {
-
-    let linkSelected = elemClicked.attr('data-link');
-
-    console.log(linkSelected);
-
-    $('body').addClass('with-panel');
-    $('#details').attr('data-link', linkSelected);
-    // setItemDetails(linkSelected);
-
-    $.get('/plm/details', { 'link' : linkSelected }, function(response) {
-        console.log(response);
-        insertItemDetails(linkSelected, response.data);
-    });
-
+    $('#status-bar').removeClass('hidden');
 
 }
-function setItemDetails(link) {
+function getMatchingStatusByClass(elem) {
 
-    getBookmarkStatus();
+         if(elem.hasClass(profile.statusDefinition.failure.className)) return profile.statusDefinition.failure;
+    else if(elem.hasClass(profile.statusDefinition.pending.className)) return profile.statusDefinition.pending;
+    else if(elem.hasClass(profile.statusDefinition.success.className)) return profile.statusDefinition.success;
+    else if(elem.hasClass(profile.statusDefinition.partial.className)) return profile.statusDefinition.partial;
 
-    $('#details-processing').show();
-    $('#details-sections').html('');
-
-    $.get('/plm/details', { 'link' : link }, function(response) {
-
-        if($('#details').attr('data-link') !== response.params.link) return;
-
-        insertItemDetailsFields(link, 'details', wsItems.sections, wsItems.fields, response.data, true, false, false);
-
-        $('#details-processing').hide();
-
-        if(multiSelect.links.length < 2) {
-
-            for(section of response.data.sections) {
-                for(field of section.fields) {
-                    if(typeof field.value !== 'undefined') {
-                        if(field.value !== null) {
-                            multiSelect.common.push({
-                                'fieldId' : field.__self__.split('/')[10],
-                                'value'   : (typeof field.value === 'object') ? field.value.link : field.value
-                            });
-                        }
-                    }
-                }
-            }
-
-        } else {
-
-            // console.log(' > parsing common properties');
-
-            for(let index = multiSelect.common.length - 1; index >= 0; index--) {
-
-                let fieldId = multiSelect.common[index].fieldId;
-                let keep    = false;
-
-                for(section of response.data.sections) {
-                
-                    for(field of section.fields) {
-
-                       
-
-                        
-
-                            let id = field.__self__.split('/')[10];
-                            
-
-                        if(fieldId === id) {
-
-                            if(field.value !== null) {
-
-
-                                let value = (typeof field.value === 'object') ? field.value.link : field.value;
-
-                                // console.log(field);
-                                // console.log(fieldId);
-                                // console.log(field.value);
-                                // console.log(multiSelect.common[index].value);
-                                if(multiSelect.common[index].value === value) {
-                                    keep = true;
-                                }
-                                // console.log(keep);
-                            }
-
-                        }
-
-                    }
-                
-                }
-
-                if(!keep) {
-                    multiSelect.common.splice(index, 1);
-                    multiSelect.varies.push(fieldId);
-                }
-                    
-            }
-
-            // console.log(multiSelect);
-
-            $('#sections').find('.field-value').each(function() {
-
-                let id = $(this).attr('data-id');
-                let reset = true;
-                for(field of multiSelect.common) {
-                    if(id === field.fieldId) {
-                        // if(field.value === $(this).val()) {
-                            reset = false;
-                        // }
-                    }
-                }
-
-                if(reset) {
-                    if($(this).hasClass('radio')) {
-                        $(this).find('input').each(function() {
-                            $(this).removeAttr('checked');
-                        });
-                    } else $(this).val('');
-                } 
-
-            });
-
-        }
-
-    });
+    return null;
 
 }
+function updateLatestColumn(elemRow, status, index) {
 
+    elemRow.removeClass(profile.statusDefinition.failure.className);
+    elemRow.removeClass(profile.statusDefinition.missing.className);
+    elemRow.removeClass(profile.statusDefinition.pending.className);
+    elemRow.removeClass(profile.statusDefinition.success.className);
+    elemRow.removeClass(profile.statusDefinition.partial.className);
 
-// Get item master details
-function getItemClassDetails() {
+    const elemLatest = elemRow.find('.matrix-column-latest').first();
+    const elemLabel  = elemLatest.find('.matrix-latest-label');
 
-    $('#items-processing').show();
+    elemLatest.attr('data-link', '');
+    elemLabel.html('');
+
+    if(status === null) return;
+
+    elemRow.addClass(status.className);
+
+    let elemHead  = $('th.matrix-column').eq(index);
+    let elemTitle = elemHead.find('.matrix-head-title');
+    const link    = elemHead.attr('data-link');
+    const count   = elemRow.find('.matrix-status-connected').length;
+
+    elemLatest.attr('data-link', link);
+    elemLatest.find('.matrix-button-filter-columns').html(count).removeClass('hidden');
+    elemLabel.html(elemTitle.html());
+
+}
+function updateStatusBarElement(statusBarCounters, id) {
+
+    const elemBar     = $('#status-bar-' + id);
+    const elemCounter = elemBar.find('.status-bar-counter');
     
-    $.get('/plm/details', { 'wsId' : wsId, 'dmsId' : dmsId }, function(response) {
-    
-        let classPath   = getSectionFieldValue(response.data.sections, 'CLASS_PATH', '');
-        let classFields = [];
-        let className;
+    elemBar.css('flex-grow', statusBarCounters[id]);
+    elemCounter.html(statusBarCounters[id]);
 
-        for(section of response.data.sections) {
-
-            if(section.hasOwnProperty('classificationId')) {
-
-                className = section.classificationName;
-
-                $('#header-subtitle').html(classPath);
-                $('#items-title').html(className);
-
-                let elemParent = $('#items-list');
-                    elemParent.html();
-
-                let elemHeader = $('<tr></tr>');
-                    elemHeader.appendTo(elemParent);
-
-                let elemHeaderItem = $('<th></th>');
-                    elemHeaderItem.html('Item');
-                    elemHeaderItem.appendTo(elemHeader);
-
-                let elemRowRef = $('<tr></tr>');
-                    elemRowRef.addClass('item');
-                    elemRowRef.addClass('reference');
-                    elemRowRef.attr('data-link', response.data.root.link);
-                    elemRowRef.attr('data-urn', response.data.urn);
-                    elemRowRef.attr('data-title', response.data.title);
-                    elemRowRef.appendTo(elemParent);
-
-                let elemRefCellItem = $('<td></td>');
-                    elemRefCellItem.html(response.data.title);
-                    elemRefCellItem.appendTo(elemRowRef);
-
-                for(field of section.fields) {
-
-                    let elemHeaderCell = $('<th></th>');
-                        elemHeaderCell.html(field.title);
-                        elemHeaderCell.appendTo(elemHeader);
-
-                    let elemRefCell = $('<td></td>');
-                        elemRefCell.html(getFieldDisplayValue(field.value));
-                        elemRefCell.addClass('value');
-                        elemRefCell.addClass('match');
-                        elemRefCell.appendTo(elemRowRef);
-
-                    classFields.push({
-                        'id' : field.urn.split('.')[9],
-                        'value' : getFieldDisplayValue(field.value)
-                    })
-
-                }
-
-                let params = { 
-                    'wsId'   : wsId,
-                    'limit'  : 1000,
-                    'offset' : 0,
-                    'query'  : 'ITEM_DETAILS:CLASS_NAME%3D' + className
-                }
-
-                $.get('/plm/search-bulk', params, function(response) {
-
-                    for(item of response.data.items) {
-
-                        let itemDMSID = item.root.urn.split('.')[5];
-
-                        if(itemDMSID !== dmsId) {
-
-                            let elemRow = $('<tr></tr>');
-                                elemRow.addClass('item');
-                                elemRow.attr('data-link', item.root.link);
-                                elemRow.attr('data-urn', item.root.urn);
-                                elemRow.attr('data-title', item.title);
-                                elemRow.appendTo(elemParent);
-
-                            let elemCellItem = $('<td></td>');
-                                elemCellItem.html(item.title);
-                                elemCellItem.appendTo(elemRow);
-
-                            for(classField of classFields) {
-
-                                let value = '';
-                                let style = 'diff';
-
-                                for(itemSection of item.sections) {
-                                    for(field of itemSection.fields) {
-                                        let fieldId = field.urn.split('.')[9];
-                                        if(fieldId === classField.id) {
-                                            value = getFieldDisplayValue(field.value);
-                                            if(value === classField.value) style = 'match'; else style = 'diff';
-                                        }
-                                    }
-                                }
-
-                                let elemCell = $('<td></td>');
-                                    elemCell.html(value);
-                                    elemCell.addClass('value');
-                                    elemCell.addClass(style);
-                                    elemCell.appendTo(elemRow);
-                            }
-
-                        }
-
-                    }
-
-                    $('#items-processing').hide();
-
-                    $('tr.item').click(function() {                        
-                        selectItem($(this));
-                    });
-
-
-                });
-            }
-
-        }    
-    });
-    
-}
-function getFieldDisplayValue(value) {
-
-    if(value !== null) {
-        if(typeof field.value === 'object') return field.value.title;
-        return field.value;
-    }
-
-    return '';
+    if(statusBarCounters[id] === 0) elemBar.addClass('hidden'); else elemBar.removeClass('hidden');
 
 }
-
-
-// Upon item selection display details
-// function selectItem(elemClicked) {
-
-//     let link = elemClicked.attr('data-link');
-
-//     $('#item').attr('data-link', link);
-//     $('#item-title').html(elemClicked.attr('data-title'));
-
-//     elemClicked.addClass('selected');
-//     elemClicked.siblings().removeClass('selected');
-
-//     if($('body').hasClass('no-panel')) {
-//         $('body').removeClass('no-panel');
-//     }  
-    
-//     setItemDetails(link);
-//     insertAttachments(link);
-//     insertViewer(link);
-//     getBookmarkStatus();
-
-// }
-
-
-// Display item details
-// function setItemDetails(link) {
-
-//     $('#item-processing').show();
-//     $('#item-sections').html('');
-
-//     let elemPanelHeaderSub = $('#item-subtitle');
-//         elemPanelHeaderSub.html('');
-
-//     let requests = [
-//         $.get('/plm/sections', { 'link' : link }),
-//         $.get('/plm/fields'  , { 'link' : link }),
-//         $.get('/plm/details' , { 'link' : link })
-//     ];
-
-//     Promise.all(requests).then(function(responses) {
-
-//         $('#item-processing').hide();
-
-//         let lifecycle = (typeof responses[2].data.lifecycle === 'undefined') ? '' : responses[2].data.lifecycle.title;
-
-//         elemPanelHeaderSub.append($('<span>' + responses[2].data.workspace.title + '</span>'));
-//         if(lifecycle !== '') elemPanelHeaderSub.append($('<span>' + lifecycle + '</span>'));
-//         insertItemDetailsFields('item', '', responses[0].data, responses[1].data, responses[2].data, false, false, false);   
-          
-//     });
-
-// }

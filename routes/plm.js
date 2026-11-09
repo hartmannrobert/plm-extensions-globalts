@@ -3,16 +3,30 @@ const router        = express.Router();
 const axios         = require('axios');
 const querystring   = require('querystring');
 const fs            = require('fs');
-const fileUpload    = require('express-fileupload');
 const ExcelJS       = require('exceljs/dist/es5');
 const FormData      = require('form-data');
-const { Console }   = require('console');
-const pathUploads   = 'uploads/';
+const urlGraphQL    = 'https://developer.api.autodesk.com/mfg/v3/graphql/public';
 
-router.use(fileUpload());
+const { resolveStoragePath } = require('./storage');
+const { validatePLMSession } = require('./landing');
+const { uploadMiddleware, getUploadedFiles, saveUploadedFiles } = require('../lib/uploads');
 
-let indexRequest = 0;
+const tenantDomain             = '.autodeskplm360.net';
+const linkParametersToValidate = ['link', 'linkParent', 'linkChild', 'imageLink', 'fileLink', 'edgeLink'];
+
+router.use(validatePLMSession);
+router.use(uploadMiddleware());
+router.use(validateLinkParameters);
+
+
 let sharedCaches = {};
+
+
+function clearSharedCaches() {
+    let count = Object.keys(sharedCaches).length;
+    sharedCaches = {};
+    return count;
+}
 
 
 function getCustomHeaders(req) {
@@ -25,20 +39,83 @@ function getCustomHeaders(req) {
         'Authorization' : req.session.headers.Authorization       
     }
 
+    if(req.session.headers.hasOwnProperty('X-user-id')) headers['X-user-id'] = req.session.headers['X-user-id'];
+
     return headers;
 }
+
+
+// Links passed by the client are appended to the tenant URL, so they must be plain API paths.
+// A value such as '@evil.com/x' would otherwise change the host (https://tenant.autodeskplm360.net@evil.com/x)
+function validateLinkParameters(req, res, next) {
+
+    for(let source of [req.query, req.body]) {
+
+        if(!source || typeof source !== 'object') continue;
+
+        for(let name of linkParametersToValidate) {
+            if(typeof source[name] !== 'undefined' && !isValidLink(source[name])) {
+                console.log('  Request rejected, invalid ' + name + ' : ' + JSON.stringify(source[name]));
+                return res.status(400).json({ error : true, message : 'Invalid ' + name });
+            }
+        }
+
+    }
+
+    next();
+
+}
+function isValidLink(link) {
+
+    const linkFormat = /^\/api\/[^\x00-\x1f\x7f\\]*$/;
+
+    if(typeof link !== 'string') return false;
+    if(link === '')              return true;    // handlers apply their own defaults
+
+    return linkFormat.test(link) && !/(^|\/)\.\.(\/|\?|#|$)/.test(link);
+
+}
+
+
 function getTenantLink(req) {
 
-    let tenant = req.app.locals.tenant;
-    
+    let tenant    = req.app.locals.tenant;
+    let requested = tenant;
+
     if(typeof req.body !== 'undefined') {
-        if(typeof req.body.tenant !== 'undefined')  tenant = req.body.tenant;
+        if(typeof req.body.tenant !== 'undefined')  requested = req.body.tenant;
     }
     if(typeof req.query !== 'undefined') {
-        if(typeof req.query.tenant !== 'undefined')  tenant = req.query.tenant;
+        if(typeof req.query.tenant !== 'undefined')  requested = req.query.tenant;
     }
 
-    return 'https://' + tenant + '.autodeskplm360.net';
+    if(isValidTenantLink(requested)) {
+        tenant = requested;
+    } else {
+        console.log('  Invalid tenant name ignored : ' + JSON.stringify(requested));
+    }
+
+    return 'https://' + tenant + tenantDomain;
+
+}
+function isValidTenantLink(tenant) {
+
+    // A tenant override (used by the tenant comparison) must be a single DNS label and the resulting URL
+    // must point to exactly <tenant>.autodeskplm360.net, otherwise the request (including the user's
+    // access token) could be redirected to another host, e.g. with values like 'evil.com/?' or 'x@evil.com/'
+
+    const tenantLabelFormat = /^[a-z0-9][a-z0-9-]{0,62}$/i;
+
+    if(typeof tenant !== 'string' || !tenantLabelFormat.test(tenant)) return false;
+
+    try {
+        let url = new URL('https://' + tenant + tenantDomain);
+        return url.protocol === 'https:'
+            && url.hostname === tenant.toLowerCase() + tenantDomain
+            && url.username === '' && url.password === '' && url.port === '';
+    } catch(error) {
+        return false;
+    }
 
 }
 function runPromised(url, headers) {
@@ -59,7 +136,7 @@ function runPromised(url, headers) {
 }
 function validateFileInCache(filename) {
 
-    return fs.existsSync('storage/cache/' + filename);
+    return fs.existsSync('storage/images/' + filename);
 
 }
 function downloadFileToCache(url, filename) {
@@ -68,7 +145,7 @@ function downloadFileToCache(url, filename) {
         responseType     : 'arraybuffer',
         responseEncoding : 'binary',
     }).then(function(response) {
-        fs.appendFileSync('storage/cache/' + filename, response.data);
+        fs.appendFileSync('storage/images/' + filename, response.data);
         return { 
             filename : filename,
             success  : true
@@ -127,6 +204,8 @@ function downloadFileToServer(rootFolder, subFolder, itemFolder, itemTitle, item
         }
     }
 
+    if(resolveStoragePath(rootFolder, subFolder, itemFolder || '', fileName) === null) return Promise.resolve({ success : false });
+
     createServerFolderPath(itemPath, clearExistingFolder);
 
     return axios.get(attachment.url, {
@@ -148,7 +227,7 @@ function downloadFileToServer(rootFolder, subFolder, itemFolder, itemTitle, item
                 let fileHeader = 'Workspace ID;DMS ID;Descriptor;'
                     + 'Attachment ID;Attachment Filename;Attachment Version;'
                     + 'Attachment Name;Attachment Extension;Attachment Type;'
-                    + 'Created By;Creation Timestamp;Attachment Size;Attachment Status'
+                    + 'Created By;Creation Timestamp;Attachment Size;Attachment Status;'
                     + 'Full Path';
                 fs.appendFileSync(indexPath, fileHeader + '\r\n');
             }
@@ -423,6 +502,38 @@ function isBlank(value) {
     return false;
 
 }
+function isComponentsWorkspace(req, wsId) {
+
+    if(req.app.locals.fusionConnected == null) return false;
+    if(!req.app.locals.fusionConnected) return false;
+    if(wsId == 57) return true;
+
+}
+async function getVaultId(req) {
+
+    if(req.session.vaultId != null) return req.session.vaultId;
+
+    const url = req.app.locals.vaultGateway + '/AutodeskDM/Services/api/vault/v2/vaults';
+
+    await axios.get(url).then(function(response) {
+
+        if(response.data.results.length > 0) {
+            if(req.app.locals.vaultName === '') {
+                req.session.vaultId = response.data.results[0].id;
+            } else {
+                for(let result of response.data.results) {
+                    if(req.app.locals.vaultName == result.name) {
+                        req.session.vaultId = result.id;
+                    }
+                }
+            }
+        }
+
+        return req.session.vaultId;
+
+    });
+
+}
 
 
 /* ----- CLEAR CACHE ENTRIES ----- */
@@ -477,34 +588,139 @@ router.get('/sections', function(req, res, next) {
     console.log(' ');
     console.log('  /sections');
     console.log(' --------------------------------------------');
-    console.log('  req.query.wsId      = ' + req.query.wsId);
-    console.log('  req.query.link      = ' + req.query.link);
-    console.log('  req.query.tenant    = ' + req.query.tenant);
-    console.log('  req.query.useCache  = ' + req.query.useCache);
-    console.log('  req.query.requestor = ' + req.query.requestor);    
+    console.log('  req.query.wsId        = ' + req.query.wsId);
+    console.log('  req.query.link        = ' + req.query.link);
+    console.log('  req.query.tenant      = ' + req.query.tenant);
+    console.log('  req.query.useCache    = ' + req.query.useCache);
+    console.log('  req.query.requestor   = ' + req.query.requestor);    
     console.log();
 
     if(notCached(req, res)) {
 
-        let wsId = req.query.wsId;
+        const wsId        = req.query.wsId || req.query.link.split('/')[4] || '';
+        const isComponent = isComponentsWorkspace(req, wsId);
+        let headers       = getCustomHeaders(req);
 
-        if(typeof wsId === 'undefined') {
-            if(typeof req.query.link !== 'undefined') {
-                wsId = req.query.link.split('/')[4];
-            }
-        }
+        if(!isComponent) {
 
-        let url = getTenantLink(req) + '/api/v3/workspaces/' + wsId + '/sections';
-        let headers = getCustomHeaders(req);
+            const url = getTenantLink(req) + '/api/v3/workspaces/' + wsId + '/sections';
+            
             headers.Accept = 'application/vnd.autodesk.plm.sections.bulk+json';
 
-        axios.get(url, {
-            headers : headers
-        }).then(function(response) {
-            sendResponse(req, res, response, false);
-        }).catch(function(error) {
-            sendResponse(req, res, error.response, true);
-        });
+            axios.get(url, {
+                headers : headers
+            }).then(function(response) {
+                sendResponse(req, res, response, false);
+            }).catch(function(error) {
+                sendResponse(req, res, error.response, true);
+            });
+
+        } else {
+
+            headers.Accept = 'multipart/mixed;deferSpec=20220824,application/json';
+
+            axios.post(urlGraphQL, {
+                query : `query CDE_PROPERTIES_CustomPropertyDefinitions($hubId: ID!, $fetchBaseDefinitions: Boolean!, $fetchCustomDefinitions: Boolean!) {
+                    hub(hubId: $hubId) {
+                        basePropertyDefinitionCollections @include(if: $fetchBaseDefinitions) {
+                        ... @defer {
+                            ...propertyCollections
+                        }
+                        }
+                        propertyDefinitionCollections @include(if: $fetchCustomDefinitions) {
+                        ... @defer {
+                            ...propertyCollections
+                        }
+                        }
+                    }
+                    }
+
+                    fragment propertyCollections on PropertyDefinitionCollections {
+                    results {
+                        name
+                        localizedName
+                        id
+                        description
+                        definitions(pagination: {limit: 500}) {
+                        results {
+                            id
+                            name
+                            localizedName
+                            propertyBehavior
+                            isArchived
+                            isHidden
+                            isReadOnly
+                            description
+                            specification
+                            units {
+                            id
+                            name
+                            }
+                            shouldCopy
+                        }
+                        }
+                    }
+                }`,
+                                    
+                variables : {
+                    fetchBaseDefinitions   : true,
+                    fetchCustomDefinitions : true,
+                    hubId                  : req.app.locals.hubId
+                }
+
+            },{
+                headers : headers
+            }).then(function(response) {
+                
+                let parts    = response.data.split('--graphql');
+                let sections = [];
+                let order    = 1;
+
+                for(let index = 2; index <= 3; index++) {
+
+                    let properties = JSON.parse(parts[index].split('content-type: application/json')[1].trim());
+                    
+                    for(let result of properties.incremental[0].data.results) {
+                        
+                        let section = {
+                            name         : result.name,
+                            description  : result.description,
+                            displayOrder : order++,
+                            id           : result.id,
+                            __self__     : '//////' + result.id,
+                            fields       : []
+                        }
+
+                        for(let property of result.definitions.results) {
+
+                            let field = {
+                                id        : property.name,
+                                link       : '///((///' + property.id,
+                                name       : property.name,
+                                type       : 'MDM',
+                                hasValue   : false,
+                                isHidden   : property.isHidden,
+                                isReadOnly : property.isReadOnly,
+                            }
+
+                            section.fields.push(field);
+
+                        }
+                    
+                        sections.push(section);    
+
+                    }
+
+                }
+
+                response.data = sections;
+
+                sendResponse(req, res, response, false);
+            }).catch(function(error) {
+                sendResponse(req, res, error.response, true);      
+            });            
+
+        }
 
     }
     
@@ -526,15 +742,8 @@ router.get('/fields', function(req, res, next) {
 
     if(notCached(req, res)) {
 
-        let wsId = req.query.wsId;
-
-        if(typeof wsId === 'undefined') {
-            if(typeof req.query.link !== 'undefined') {
-                wsId = req.query.link.split('/')[4];
-            }
-        }
-
-        let url = getTenantLink(req) + '/api/v3/workspaces/' + wsId + '/fields';
+        const wsId = req.query.wsId || req.query.link.split('/')[4] || '';
+        const url  = getTenantLink(req) + '/api/v3/workspaces/' + wsId + '/fields';
         
         axios.get(url, {
             headers : req.session.headers
@@ -552,23 +761,34 @@ router.get('/fields', function(req, res, next) {
 
 
 /* ----- GET ALL PICKLISTS ----- */
-router.get('/picklists', function(req, res, next) {
+router.get('/picklists', async function(req, res, next) {
 
     console.log(' ');
     console.log('  /picklists');
     console.log(' --------------------------------------------');
-    console.log('  req.query.tenant   = ' + req.query.tenant);
-    console.log('  req.query.useCache = ' + req.query.useCache);
+    console.log('  req.query.tenant       = ' + req.query.tenant);
+    console.log('  req.query.hideAllUsers = ' + req.query.hideAllUsers);
+    console.log('  req.query.useCache     = ' + req.query.useCache);
     console.log();
 
     if(notCached(req, res)) {
 
-        let url = getTenantLink(req) + '/api/rest/v1/setups/picklists';
-        
-        axios.get(url, {
+        const url          = getTenantLink(req) + '/api/rest/v1/setups/picklists';
+        const hideAllUsers = (typeof req.query.hideAllUsers === 'undefined') ? false : (req.query.hideAllUsers == 'true');
+            
+        axios.get(url, { 
             headers : req.session.headers
         }).then(function(response) {
-            if(response.data === "") response.data = { 'items' : [] };
+            if(response.data === '') response.data = { list : { picklist : [] }};
+            else if(hideAllUsers) {
+                const index = response.data.list.picklist.findIndex(item => item.id === 'CUSTOM_LOOKUP_ALL_USERS_VIEW');
+                if (index !== -1) {
+                    response.data.list.picklist.splice(index, 1);
+                }
+            }
+            for(let picklist of response.data.list.picklist) {
+                picklist.link = picklist.uri.split('.autodeskplm360.net').pop();
+            }
             sendResponse(req, res, response, false);
         }).catch(function (error) {
             sendResponse(req, res, error.response, true);
@@ -590,9 +810,8 @@ router.get('/picklist-setup', function(req, res, next) {
     console.log('  req.query.tenant = ' + req.query.tenant);
     console.log();
 
-    let id = (typeof req.query.id === 'undefined') ? req.query.link.split('/').pop() : req.query.id;
-
-    let url = getTenantLink(req) + '/api/rest/v1/setups/picklists/' + id;
+    const id  = (typeof req.query.id === 'undefined') ? req.query.link.split('/').pop() : req.query.id;
+    const url = getTenantLink(req) + '/api/rest/v1/setups/picklists/' + id;
     
     axios.get(url, {
         headers : req.session.headers
@@ -819,11 +1038,11 @@ function genPayloadSectionsFields(req, prefix, mode) {
 
         let fieldData = {
             __self__ : prefix   + '/views/1/fields/' + field.fieldId,
-            title    : field.title,
+            title    : field.title || '',
             value    : getFieldValue(field)
         }
 
-        if(field.hasOwnProperty('fieldTypeId')) fieldData.type = genPayloadFieldType(req, field)
+        if(field.hasOwnProperty('fieldTypeId')) fieldData.type = genPayloadFieldType(req, field);
 
         if(typeof field.classId !== 'undefined') {
             if(field.classId !== '') {
@@ -838,8 +1057,16 @@ function genPayloadSectionsFields(req, prefix, mode) {
                             __self__ : fieldData.__self__
                         };
                     }
-                }
+                } 
             }
+        }
+
+        if(field.type === 'multi-select') {
+            let values = [];
+            for(let value of fieldData.value) {
+                values.push((typeof value === 'string') ? { value : value } : value);
+            }
+            fieldData.value = values;
         }
 
         let sectionId = field.sectionId;
@@ -849,7 +1076,10 @@ function genPayloadSectionsFields(req, prefix, mode) {
             let fieldSection = getFieldSection(req.body.sections, field);
 
             if(fieldSection !== null) {
-                sectionId = fieldSection.__self__.split('/').pop();
+
+                const linkSection = fieldSection.__self__ || fieldSection.link;
+
+                sectionId = linkSection.split('/').pop();
             }
 
         }
@@ -923,8 +1153,13 @@ function getFieldSection(sections, field) {
 
             for(let sectionField of section.fields) {
 
-                if(field.fieldId === sectionField.link.split('/').pop()) return section;
-                if(field.link === sectionField.link) return section;
+                const linkSectionField = sectionField.__self__ || sectionField.link || '';
+
+                if(linkSectionField !== '') {
+                    if(field.fieldId === linkSectionField.split('/').pop()) return section;
+                    if(field.link    === linkSectionField) return section;
+                }
+
                 if(sectionField.type === 'MATRIX') {
                     for(let matrix of section.matrices) {
                         for(let matrixFields of matrix.fields) {
@@ -942,6 +1177,7 @@ function getFieldSection(sections, field) {
                         }
                     }
                 }
+
             }   
         }   
     }
@@ -976,9 +1212,10 @@ function getFieldValue(field) {
             break;
 
         case 'integer':
-            value = parseInt(field.value);
+            value = (value === '') ? null : parseInt(field.value);
             break;
 
+        case 'image':
         case 'radio':
         case 'buom':
         case 'single-select':
@@ -1059,8 +1296,6 @@ function parseSectionPayload(req, prefix, mode) {
                 //     break;
 
                 default:
-                    // console.log(type);
-                    // console.log(field);
                     if(value === '') value = null;
                     break;
 
@@ -1216,22 +1451,11 @@ router.post('/clone', function(req, res) {
                 'title'         : field.title
             });
 
-            // console.log({
-            //     '__self__'      : prefix + '/views/1/fields/' + field.fieldId,
-            //     'value'         : value,
-            //     'urn'           : 'urn:adsk.plm:tenant.workspace.view.field:' + req.app.locals.tenant.toUpperCase() + '.' + wsId + '.1.' + field.fieldId,
-            //     'fieldMetadata' : null,
-            //     'dataTypeId'    : Number(field.typeId),
-            //     'title'         : field.title
-            // });
-
         }
 
         sections.push(sect);
 
     }
-
-    // console.log(sections);
 
     let params = {
         'sourceItemId'  : req.body.link.split('/')[6],
@@ -1242,26 +1466,19 @@ router.post('/clone', function(req, res) {
         }
     };
 
-    // console.log(params);
-
     formData.append('itemDetail', JSON.stringify(params), {
         filename    : 'blob',
         contentType : 'application/json'
     });
 
-    // console.log(formData);
-
     let headers = getCustomHeaders(req);
         headers['content-type'] = formData.getHeaders()['content-type'];
         headers.Accept = 'application/vnd.autodesk.plm.meta+json';
-
-    // console.log(headers);
     
     axios.post(url, formData, { headers : headers }).then(function (response) {
         console.log(response)
         sendResponse(req, res, { 'data' : response.headers.location }, false);
     }).catch(function (error) {
-        // console.log(error);
         sendResponse(req, res, error.response, true);
     });
 
@@ -1627,42 +1844,163 @@ router.get('/details', function(req, res, next) {
     console.log(' ');
     console.log('  /details');
     console.log(' --------------------------------------------');
-    console.log('  req.query.wsId      = ' + req.query.wsId);
-    console.log('  req.query.dmsId     = ' + req.query.dmsId);
-    console.log('  req.query.link      = ' + req.query.link);
-    console.log('  req.query.useCache  = ' + req.query.useCache);
-    console.log('  req.query.requestor = ' + req.query.requestor);
+    console.log('  req.query.wsId        = ' + req.query.wsId);
+    console.log('  req.query.dmsId       = ' + req.query.dmsId);
+    console.log('  req.query.link        = ' + req.query.link);
+    console.log('  req.query.isComponent = ' + req.query.isComponent);
+    console.log('  req.query.modelId     = ' + req.query.modelId);
+    console.log('  req.query.useCache    = ' + req.query.useCache);
+    console.log('  req.query.requestor   = ' + req.query.requestor);
     console.log();
 
     if(notCached(req, res)) {
 
-        let link = (typeof req.query.link !== 'undefined') ? req.query.link : '/api/v3/workspaces/' + req.query.wsId + '/items/' + req.query.dmsId;
-        let url  = req.app.locals.tenantLink + link;
+        let link        = (typeof req.query.link !== 'undefined') ? req.query.link : '/api/v3/workspaces/' + req.query.wsId + '/items/' + req.query.dmsId;
+        let url         = getTenantLink(req) + link;
+        let isComponent = (typeof req.query.isComponent     === 'undefined') ? false : (req.query.isComponent == 'true');
 
-        axios.get(url, {
-            headers : req.session.headers
-        }).then(function(response) {
-            for(let section of response.data.sections) {
-                for(let field of section.fields) {
-                    if(field.type.title === 'Image') {
-                        if(typeof field.value !== 'undefined') {
-                            if(field.value !== null) {
-                                let imageId   = field.value.link.split('/').pop();
-                                let split     = link.split('/');
-                                let imageFile = split[4] + '-' + split[6] + '-' + field.__self__.split('/').pop() + '-' + imageId + '.jpg';
-                                let exists = fs.existsSync('storage/cache/' + imageFile);
-                                field.value.imageFile = (exists) ? imageFile : '';    
+        if(!isComponent) {
+
+            axios.get(url, {
+                headers : req.session.headers
+            }).then(function(response) {
+                for(let section of response.data.sections) {
+                    for(let field of section.fields) {
+                        if(field.type.title === 'Image') {
+                            if(typeof field.value !== 'undefined') {
+                                if(field.value !== null) {
+                                    let imageId   = field.value.link.split('/').pop();
+                                    let split     = link.split('/');
+                                    let imageFile = split[4] + '-' + split[6] + '-' + field.__self__.split('/').pop() + '-' + imageId + '.jpg';
+                                    let exists = fs.existsSync('storage/images/' + imageFile);
+                                    field.value.imageFile = (exists) ? imageFile : '';    
+                                }
                             }
+                                                
                         }
-                                               
                     }
                 }
-            }
-            sendResponse(req, res, response, false);
-        }).catch(function(error) {
-            sendResponse(req, res, error.response, true);
-        });
+                sendResponse(req, res, response, false);
+            }).catch(function(error) {
+                sendResponse(req, res, error.response, true);
+            });
 
+        } else {
+
+            let requests = [];
+            let modelId  = (typeof req.query.modelId !== 'undefined') ? req.query.modelId : '';
+
+            if(modelId === '') {
+                requests.push(axios.get(url, { headers : req.session.headers }));
+            }
+
+            Promise.all(requests).then(function(responses) {
+
+                modelId = (requests.length > 0) ? responses[0].data.modelId : modelId;
+
+                axios.post(urlGraphQL, {
+                    query : `query GetModelProperties($modelId: ID!) {
+                        model(modelId : $modelId) {
+                        id
+                        isPrimary
+                        isConfiguration
+                            name {
+                                ...property
+                            }
+                        thumbnail {
+                        id
+                        signedUrl
+                        }
+                            physicalProperties {
+                        density {
+                            ...physicalProperty
+                        }
+                        mass {
+                            ...physicalProperty
+                        }
+                        volume {
+                            ...physicalProperty
+                        }
+                        }
+                            component {
+                                itemNumber {
+                                    id
+                                }
+                                description {
+                                    ...property
+                                }
+                                baseProperties {
+                                    ...customProperties
+                                }
+                                customProperties {
+                                    ...customProperties
+                                }			
+                            }
+                    }
+                    }
+
+                    fragment property on Property {
+                    value
+                    name
+                    displayValue
+                    }
+
+                    fragment physicalProperty on Property {
+                    value
+                    displayValue
+                    definition {
+                        specification
+                        units {
+                        name
+                        id
+                        }
+                    }
+                    }
+
+                    fragment customProperties on Properties {
+                    results {
+                        definition {
+                        id
+                        }
+                        ...property
+                    }
+                    }`,
+                       
+                    variables : {
+                        modelId : modelId,
+                    }
+
+                },{
+                    headers: req.session.headers
+                }).then(function(response) {
+
+                    let fields = [];
+                    let model  = response.data.data.model;
+
+                    fields.push(model.thumbnail);
+                    fields.push(model.physicalProperties.density);
+                    fields.push(model.physicalProperties.mass);
+                    fields.push(model.physicalProperties.volume);
+                    fields.push(model.component.itemNumber);
+                    fields.push(model.component.description);
+
+                    for(let property of model.component.baseProperties.results) {
+                        fields.push(property);
+                    }
+                    for(let property of model.component.customProperties.results) {
+                        fields.push(property);
+                    }
+
+                    response.data.fields   = fields;
+                    response.data.sections = [];
+                    sendResponse(req, res, response, false);
+
+                }).catch(function(error) {
+                    sendResponse(req, res, error.response, true);      
+                });
+            
+            });
+        }
     }
     
 });
@@ -1743,6 +2081,7 @@ router.get('/image-cache', function(req, res) {
     console.log('  req.query.imageId   = ' + req.query.imageId);
     console.log('  req.query.imageLink = ' + req.query.imageLink);
     console.log('  req.query.link      = ' + req.query.link);
+    console.log('  req.query.fileName  = ' + req.query.fileName);
     console.log();
    
     let wsId      = req.query.wsId      || '';
@@ -1750,51 +2089,86 @@ router.get('/image-cache', function(req, res) {
     let fieldId   = req.query.fieldId   || '';
     let imageId   = req.query.imageId   || '';
     let imageLink = req.query.imageLink || '';
-
+    let link      = req.query.link || '';
+    let fileName  = req.query.fileName  || '';
+    
     if(typeof req.query.link !== 'undefined') {
         wsId  = (wsId  === '') ? req.query.link.split('/')[4] : wsId;
         dmsId = (dmsId === '') ? req.query.link.split('/')[6] : dmsId;
     }
 
-    if(imageLink === '') {
+    if(typeof req.query.imageLink !== 'undefined') {
+        wsId    = (   wsId === '') ? req.query.imageLink.split('/')[4]  : wsId;
+        dmsId   = (  dmsId === '') ? req.query.imageLink.split('/')[6]  : dmsId;
+        fieldId = (fieldId === '') ? req.query.imageLink.split('/')[8]  : fieldId;
+        imageId = (imageId === '') ? req.query.imageLink.split('/')[10] : imageId;
+    }    
 
-        imageLink = '/api/v2/workspaces/' + wsId + '/items/' + dmsId + '/field-values/' + fieldId + '/image/' + imageId;
-
-    } else {
-
-        let split = imageLink.split('/');
-
-        wsId    = split[4];
-        dmsId   = split[6];
-        fieldId = split[8];
-        imageId = split[10];
-
+    if(link === '') {
+        link = '/api/v3/workspaces/' + wsId + '/items/' + dmsId;
     }
-        
-    let url      = req.app.locals.tenantLink + imageLink;
-    let fileName = wsId + '-' + dmsId + '-' + fieldId + '-' + imageId + '.jpg';
+    
+    if(fileName === '') {
+        if(imageId !== '') {
+            fileName = wsId + '-' + dmsId + '-' + fieldId + '-' + imageId + '.jpg';
+        }
+    }
 
-    fs.stat('storage/cache/' + fileName, function(err, stat) {
+    if(resolveStoragePath('cache', fileName) === null) return res.status(400).json({ error : true, message : 'Invalid file name' });
+
+    fs.stat('storage/images/' + fileName, function(err, stat) {
 
         if(err === null) {
-            
-            sendResponse(req, res, { data : { url : 'storage/cache/' + fileName } }, false);
+
+            sendResponse(req, res, { data : { url : 'storage/images/' + fileName } }, false);
 
         } else if(err.code == 'ENOENT') {
 
-            axios.get(url, { 
-                responseType     : 'arraybuffer',
-                responseEncoding : 'binary',
-                headers : {
-                    'Authorization' : req.session.headers['Authorization'],
-                    'Accept'        : 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8'
+            if(!imageLink && !imageId) {
+
+                let url = getTenantLink(req) + link;
+
+                axios.get(url, {
+                    headers : req.session.headers
+                }).then(function(response) {
+                    for(let section of response.data.sections) {
+                        for(let field of section.fields) {
+                            if(field.type.title === 'Image') {
+                                if(field.value !== null) {
+                                    imageLink = field.value.link;
+                                }
+                            }
+                        }
+                    }
+
+                    if(imageLink === '') {
+                        sendResponse(req, res, {}, true);  
+                    } else {
+                        downloadImageToCache(req, res, imageLink, fileName);
+                    }
+
+                });
+
+            } else {
+
+                if(imageLink === '') {
+
+                    imageLink = '/api/v2/workspaces/' + wsId + '/items/' + dmsId + '/field-values/' + fieldId + '/image/' + imageId;
+
+                } else {
+
+                    let split = imageLink.split('/');
+
+                    wsId    = split[4];
+                    dmsId   = split[6];
+                    fieldId = split[8];
+                    imageId = split[10];
+
                 }
-            }).then(function (response) {
-                fs.appendFileSync('storage/cache/' + fileName, response.data);
-                sendResponse(req, res, { data : { url : '/storage/cache/' + fileName }  }, false);
-            }).catch(function (error) {
-                sendResponse(req, res, error.response, true);   
-            });
+
+                downloadImageToCache(req, res, imageLink, fileName);
+
+            }
 
         } else {
             console.log('Some other error: ', err.code);
@@ -1804,6 +2178,25 @@ router.get('/image-cache', function(req, res) {
     });
    
 });
+function downloadImageToCache(req, res, imageLink, fileName) {
+
+    let url = getTenantLink(req) + imageLink;
+
+    axios.get(url, { 
+        responseType     : 'arraybuffer',
+        responseEncoding : 'binary',
+        headers          : {
+            'Authorization' : req.session.headers['Authorization'],
+            'Accept'        : 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8'
+        }
+    }).then(function (response) {
+        fs.appendFileSync('storage/images/' + fileName, response.data);
+        sendResponse(req, res, { data : { url : '/storage/images/' + fileName }  }, false);
+    }).catch(function (error) {
+        sendResponse(req, res, error.response, true);   
+    });        
+
+}
 
 
 /* ----- UPLOAD ITEM IMAGE ----- */
@@ -1942,7 +2335,7 @@ router.post('/remove-grid-row', function(req, res, next) {
     console.log(); 
 
     let url  = req.app.locals.tenantLink + req.body.link;
-    
+
     axios.delete(url, {
         headers : req.session.headers
     }).then(function(response) {
@@ -2691,6 +3084,8 @@ router.post('/export-attachments', function(req, res, next) {
     let headers = getCustomHeaders(req);
         headers.Accept = 'application/vnd.autodesk.plm.attachments.bulk+json';
 
+    if(resolveStoragePath(rootFolder, subFolder) === null) return res.status(400).json({ error : true, message : 'Invalid rootFolder or subFolder' });
+
     if(subFolder !== '') {
         if(clearFolder) {
             createServerFolderPath('storage/' + rootFolder + '/' + subFolder, true);
@@ -2779,6 +3174,190 @@ router.post('/export-attachments', function(req, res, next) {
 });
 
 
+/* ----- NEW FILES UPLOAD FOR DND ----- */
+router.post('/upload-file', async (req, res) => {
+   
+    console.log(' ');
+    console.log('  /upload-file');
+    console.log(' --------------------------------------------');  
+    console.log('  req.headers.link           = ' + req.headers.link);
+    console.log('  req.headers["x-file-name"] = ' + req.headers["x-file-name"]);
+    console.log('  req.headers["x-file-size"] = ' + req.headers["x-file-size"]);
+    console.log('  req.headers["x-file-id"]   = ' + req.headers["x-file-id"]);
+    console.log('  req.headers["x-folder-id"] = ' + req.headers["x-folder-id"]);
+    console.log();
+
+    const link            = req.headers.link || "";
+    const url             = getTenantLink(req) + link;
+    const encodedFileName = req.headers["x-file-name"] || "";
+    const fileSizeHeader  = req.headers["x-file-size"] || "";    
+    const fileName        = decodeURIComponent(encodedFileName);
+    const fileSize        = Number(fileSizeHeader);
+    const fileId          = req.headers['x-file-id']|| '';
+    const folderId        = req.headers['x-folder-id']|| '';
+
+    const result = await uploadFileToPLM({
+        headers : req.session.headers,
+        url, 
+        fileName,
+        fileSize,
+        fileId,
+        folderId,
+        contentType: req.headers['content-type'] || 'application/octet-stream',
+        stream: req
+    });
+
+    sendResponse(req, res, { 'data' : result }, false);
+   
+});
+async function uploadFileToPLM({headers, url, fileName, fileSize, fileId, folderId, contentType, stream}) {
+
+    let attachment;
+
+    // STEP 1 : Ask Fusion Manage for an attachment and signed upload URL.
+    if(fileId === '') {
+        
+        attachment = await createPLMAttachment({
+            headers,
+            url,
+            fileName,
+            fileSize
+        });
+
+    } else {
+
+        attachment = await createPLMAttachmentVersion({
+            headers,
+            url,
+            fileName,
+            fileSize,
+            fileId
+        });
+
+    }
+
+    const attachmentId  = attachment.id;
+    const uploadUrl     = attachment.url;
+    const uploadHeaders = attachment.extraHeaders;
+
+    if (!attachmentId || !uploadUrl) {
+        throw new Error(
+            'Fusion Manage did not return the expected attachment ID / upload URL.'
+        );
+    }
+
+    // STEP 2 : Stream the browser's file directly into the signed storage URL.
+    await uploadBinaryToSignedUrl({
+        uploadUrl,
+        uploadHeaders,
+        stream,
+        contentType,
+        fileSize
+    });
+
+    // STEP 3 : Tell Fusion Manage the upload is complete.
+    return await checkInPLMAttachment(headers, url, attachmentId);
+
+}
+async function createPLMAttachment({headers, url, fileName, fileSize}) {
+
+    const response = await fetch(url + '/attachments', {
+        method  : 'POST',
+        headers : headers,
+        body    : JSON.stringify({
+            description  : 'File Upload by UX Extensions',
+            folder       : null,
+            name         : fileName,
+            resourceName : fileName,
+            size         : fileSize
+        })
+    });
+
+    if (!response.ok) {
+        const body = await response.text();
+        throw new Error(
+            'Fusion Manage attachment creation failed: ' +
+            '${response.status} ${body}'
+        );
+    }
+
+    return response.json();
+
+}
+async function createPLMAttachmentVersion({headers, url, fileName, fileSize, fileId}) {
+
+    const response = await fetch(url + '/attachments/' + fileId, {
+        method  : 'POST',
+        headers : headers,
+        body    : JSON.stringify({
+            description  : 'File Upload by UX Extensions',
+            folder       : null,
+            name         : fileName,
+            resourceName : fileName,
+            size         : fileSize
+        })
+    });
+
+    if (!response.ok) {
+        const body = await response.text();
+        throw new Error(
+            'Fusion Manage attachment version creation failed: ' +
+            '${response.status} ${body}'
+        );
+    }
+
+    return response.json();
+
+}
+async function uploadBinaryToSignedUrl({uploadUrl, uploadHeaders, stream, contentType, fileSize}) {
+
+    const response = await fetch(uploadUrl, {
+        method  : 'PUT',
+        body    : stream,
+        duplex  : 'half',   // Required by Node's fetch implementation when streaming a request body.
+        headers : {
+            ...uploadHeaders,
+            "Content-Type": contentType,
+            "Content-Length": String(fileSize)
+        }
+    });
+
+    if (!response.ok) {
+        const body = await response.text();
+        throw new Error(
+            `Binary upload failed: ` +
+            `${response.status} ${body}`
+        );
+    }
+}
+async function checkInPLMAttachment(headers, url, attachmentId) {
+
+    const response = await fetch(url + '/attachments/' + attachmentId, {
+        method: "PATCH",
+        headers: {
+            ...headers,
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+            status: {
+                name: "CheckIn"
+            }
+        })
+    });
+
+    if (!response.ok) {
+        const body = await response.text();
+        throw new Error(
+            `Fusion Manage check-in failed: ` +
+            `${response.status} ${body}`
+        );
+    }
+
+    return response.json();
+}
+
+
 /* ----- ATTACHMENT UPLOAD ----- */
 router.post('/upload/:wsId/:dmsId', function(req, res) {
    
@@ -2787,57 +3366,53 @@ router.post('/upload/:wsId/:dmsId', function(req, res) {
     console.log(' --------------------------------------------');  
     console.log('  req.params.wsId           = ' + req.params.wsId);
     console.log('  req.params.dmsId          = ' + req.params.dmsId);
+    console.log('  req.params.link           = ' + req.params.link);
     console.log('  req.params.folderName     = ' + req.params.folderName);
     console.log('  req.params.updateExisting = ' + req.params.updateExisting);
     console.log();
 
-    if (!req.files)
-        sendResponse(req, res, { 'data' : [], 'status' : 400 }, false);
-    //    return res.status(400).send('No files were uploaded.');
+    let files = getUploadedFiles(req);
 
-    let files          = [];
+    if(files.length === 0) return sendResponse(req, res, { 'data' : [], 'status' : 400 }, false);
+
+    let link           = req.params.link || '/api/v3/workspaces/' + req.params.wsId + '/items/' + req.params.dmsId;
     let folderName     = (typeof req.params.folderName     === 'undefined') ?   '' : req.params.folderName;
     let updateExisting = (typeof req.params.updateExisting === 'undefined') ? true : (req.params.updateExisting == 'true');
 
-    if(Array.isArray(req.files.newFiles)) {
-        files = req.files.newFiles;
-    } else files.push(req.files.newFiles);
-  
-    let promises = [];
-
-    for(let file of files) {
-        promises.push(file.mv(pathUploads + file.name));
-    }
-
-    Promise.all(promises).then(function() {
+    // every request uses its own upload folder which is removed when the response is finished
+    saveUploadedFiles(res, files).then(function(savedFiles) {
 
         console.log('   > Moved files to folder uploads');
            
-        getAttachments(req, function(attachmentsList) {
-            processFiles(req, res, attachmentsList, folderName, files, updateExisting);
+        getAttachments(req, link, function(attachmentsList) {
+            processFiles(req, res, link, attachmentsList, folderName, savedFiles, updateExisting);
+        }, function(error) {
+            sendResponse(req, res, { message : 'Failed to read the existing attachments' }, true);
         });
        
+    }).catch(function(error) {
+        console.log('   > Failed to store uploaded files : ' + error.message);
+        sendResponse(req, res, { message : 'Failed to store the uploaded files' }, true);
     });
    
 });
-function processFiles(req, res, attachmentsList, folderName, files, updateExisting) {
+function processFiles(req, res, link, attachmentsList, folderName, files, updateExisting) {
     
     if(files.length === 0) {
         sendResponse(req, res, { 'data' : 'success' }, false);
     } else {
-        parseAttachments(req, pathUploads + files[0].name, files[0].name, attachmentsList, folderName, updateExisting, function() {
-            fs.unlinkSync(pathUploads + files[0].name);
-            files.splice(0, 1);
-            processFiles(req, res, attachmentsList, folderName, files);
+        let file = files.shift();
+        parseAttachments(req, link, file.path, file.name, attachmentsList, folderName, updateExisting, function() {
+            processFiles(req, res, link, attachmentsList, folderName, files, updateExisting);
         });
     }
 
 }
-function getAttachments(req, callback) {
+function getAttachments(req, link, callback, callbackError) {
    
     console.log('   > Getting list of existing attachments');
 
-    let url = req.app.locals.tenantLink + '/api/v3/workspaces/' + req.params.wsId + '/items/' + req.params.dmsId + '/attachments?asc=name';
+    let url = req.app.locals.tenantLink + link + '/attachments?asc=name';
    
     let headers = getCustomHeaders(req);
         headers['Accept'] = 'application/vnd.autodesk.plm.attachments.bulk+json';
@@ -2849,10 +3424,11 @@ function getAttachments(req, callback) {
     }).catch(function (error) {
         console.log(' > ERROR');
         console.log(error.message);
+        if(typeof callbackError === 'function') callbackError(error);
     });  
    
 }
-function parseAttachments(req, path, fileName, attachmentsList, folderName, updateExisting, callback) {
+function parseAttachments(req, link, path, fileName, attachmentsList, folderName, updateExisting, callback) {
    
     console.log('   > Checking list of attachments');
    
@@ -2881,32 +3457,32 @@ function parseAttachments(req, path, fileName, attachmentsList, folderName, upda
 
     if(fileId !== '') {
         if(updateExisting) {
-            createVersion(req, folderId, fileId, path, fileName, function() {
+            createVersion(req, link, folderId, fileId, path, fileName, function() {
                 callback({ action : 'version', message : 'Version created' });
             });
         } else callback({ action : 'exists', message : 'No action, file exits' });
     } else if(folderName === '') {
-        createFile(req, null, path, fileName, function() {
+        createFile(req, link, null, path, fileName, function() {
             callback({ action : 'new', message : 'New file uploaded '});
         });
     } else if(folderId === '') {
-        createFolder(req, folderName, function(data) {
-            createFile(req, {'id':data}, path, fileName, function() {
+        createFolder(req, link, folderName, function(data) {
+            createFile(req, link, {'id':data}, path, fileName, function() {
                 callback({ action : 'new folder', message : 'Uploaded new file to new folder' });
             });
         });
     } else {
-        createFile(req, folderId, path, fileName, function() {
+        createFile(req, link, folderId, path, fileName, function() {
             callback({ action : 'new file in folder', message : 'Uploaded new file to existing folder' });
         });
     }
    
 }
-function createFolder(req, folderName, callback) {
+function createFolder(req, link, folderName, callback) {
    
    console.log('   > Creating folder ' + folderName);
        
-   let url = req.app.locals.tenantLink + '/api/v3/workspaces/' + req.params.wsId + '/items/' + req.params.dmsId + '/folders';
+   let url = req.app.locals.tenantLink + link + '/folders';
    
    axios.post(url, {
        'folderName' : folderName 
@@ -2924,12 +3500,12 @@ function createFolder(req, folderName, callback) {
    }); 
    
 }
-function createFile(req, folderId, path, fileName, callback) {
+function createFile(req, link, folderId, path, fileName, callback) {
    
     console.log('   > Creating file record');
 
     let stats = fs.statSync(path);
-    let url   = req.app.locals.tenantLink + '/api/v3/workspaces/' + req.params.wsId + '/items/' + req.params.dmsId + '/attachments';
+    let url   = req.app.locals.tenantLink + link + '/attachments';
    
     req.session.headers.Accept = 'application/json';
     
@@ -2950,7 +3526,7 @@ function createFile(req, folderId, path, fileName, callback) {
        headers : req.session.headers
     }).then(function (response) {
         uploadFile(req, path, response.data, function(fileId) {
-            setStatus(req, fileId, function() {
+            setStatus(req, link, fileId, function() {
                 callback();
             });
         });          
@@ -2959,12 +3535,12 @@ function createFile(req, folderId, path, fileName, callback) {
     }); 
    
 }
-function createVersion(req, folderId, fileId, path, fileName, callback) {
+function createVersion(req, link, folderId, fileId, path, fileName, callback) {
    
    console.log('   > Creating new version as file exists already');
    
    let stats   = fs.statSync(path);
-   let url     = req.app.locals.tenantLink + '/api/v3/workspaces/' + req.params.wsId + '/items/' + req.params.dmsId + '/attachments/' + fileId;
+   let url     = req.app.locals.tenantLink + link + '/attachments/' + fileId;
    
    if(folderId === '') folderId = null;
    
@@ -2980,7 +3556,7 @@ function createVersion(req, folderId, fileId, path, fileName, callback) {
        headers : req.session.headers
    }).then(function (response) {
         uploadFile(req, path, response.data, function(fileId) {
-            setStatus(req, fileId, function() {
+            setStatus(req, link, fileId, function() {
                 callback();
             });
         });
@@ -3004,11 +3580,11 @@ function uploadFile(req, path, fileData, callback) {
     }); 
    
 }
-function setStatus(req, fileId, callback) {
+function setStatus(req, link, fileId, callback) {
    
     console.log('   > Setting Status in PLM');
    
-    let url = req.app.locals.tenantLink + '/api/v3/workspaces/' + req.params.wsId + '/items/' + req.params.dmsId + '/attachments/' + fileId;
+    let url = req.app.locals.tenantLink + link + '/attachments/' + fileId;
    
     axios.patch(url, {
        status : {
@@ -3046,6 +3622,8 @@ router.post('/upload-screenshot', function(req, res) {
     let data      = req.body.image.value.replace(/^data:image\/\w+;base64,/, '');
     let stream    = new Buffer.from(data, 'base64');
     let path      = 'storage/uploads';
+
+    if(resolveStoragePath('uploads', fileName) === null) return res.status(400).json({ error : true, message : 'Invalid file name' });
 
     createServerFolderPath(path, false);
 
@@ -3124,6 +3702,13 @@ router.post('/import-attachment', function(req, res) {
     let pathFailure    = (typeof req.body.pathFailure    === 'undefined') ? '__failed'  : req.body.pathFailure;
     let pathSuccess    = (typeof req.body.pathSuccess    === 'undefined') ? '__success' : req.body.pathSuccess;
     let pathSkipped    = (typeof req.body.pathSkipped    === 'undefined') ? '__skipped' : req.body.pathSkipped;
+
+    if(   resolveStoragePath(req.body.path, folderName, fileName) === null
+       || resolveStoragePath(req.body.path, pathFailure ) === null
+       || resolveStoragePath(req.body.path, pathSuccess ) === null
+       || resolveStoragePath(req.body.path, pathSkipped ) === null) {
+        return res.status(400).json({ error : true, message : 'Invalid path' });
+    }
 
     pathFailure = 'storage/' + req.body.path + '/' + pathFailure;
     pathSuccess = 'storage/' + req.body.path + '/' + pathSuccess;
@@ -3259,8 +3844,9 @@ router.post('/import-attachment', function(req, res) {
 function importAttachment(req, res, folderName, pathFile, pathSuccess, pathSkipped, fileName, attachmentsFolder, updateExisting, onSuccess) {
 
     let pathRoot = 'storage/' + req.body.path;
+    let link     = req.params.link || '/api/v3/workspaces/' + req.params.wsId + '/items/' + req.params.dmsId;
     
-    getAttachments(req, function(attachmentsList) {
+    getAttachments(req, link, function(attachmentsList) {
 
         parseAttachments(req, pathFile, fileName, attachmentsList, attachmentsFolder, updateExisting, function(response) {
 
@@ -3444,7 +4030,7 @@ router.get('/get-viewable', function(req, res, next) {
 
         let headers = getCustomHeaders(req);
             headers.Accept = 'application/vnd.autodesk.plm.attachment.viewable+json';
-        
+
         axios.get(url, {
             headers : headers
         }).then(function(response) {
@@ -3469,6 +4055,7 @@ router.post('/get-viewables', function(req, res, next) {
     console.log('  req.body.wsId              = ' + req.body.wsId);
     console.log('  req.body.dmsId             = ' + req.body.dmsId);
     console.log('  req.body.link              = ' + req.body.link);
+    console.log('  req.body.isComponent       = ' + req.body.isComponent);
     console.log('  req.body.fileId            = ' + req.body.fileId);
     console.log('  req.body.filename          = ' + req.body.filename);
     console.log('  req.body.suffixPrimaryFile = ' + req.body.suffixPrimaryFile);
@@ -3476,126 +4063,221 @@ router.post('/get-viewables', function(req, res, next) {
     console.log('  req.body.extensionsEx      = ' + req.body.extensionsEx);
     console.log();
     
-    let link              = (typeof req.body.link === 'undefined') ? '/api/v3/workspaces/' + req.body.wsId + '/items/' + req.body.dmsId : req.body.link;
-    let urlBase           = getTenantLink(req) + link + '/attachments';
-    let fileId            = (typeof req.body.fileId            === 'undefined') ? '' : req.body.fileId;
-    let filename          = (typeof req.body.filename          === 'undefined') ? '' : req.body.filename;
-    let suffixPrimaryFile = (typeof req.body.suffixPrimaryFile === 'undefined') ? ['.iam.dwf', '.iam.dwfx', '.ipt.dwf', '.ipt.dwfx'] : req.body.suffixPrimaryFile;
-    let extensionsIn      = (typeof req.body.extensionsIn      === 'undefined') ? ['dwf', 'dwfx', 'nwd', 'iam', 'ipt', 'stp', 'step', 'sldprt', 'pdf'] : req.body.extensionsIn;
-    let extensionsEx      = (typeof req.body.extensionsEx      === 'undefined') ? [] : req.body.extensionsEx;
+    const link              = (typeof req.body.link === 'undefined') ? '/api/v3/workspaces/' + req.body.wsId + '/items/' + req.body.dmsId : req.body.link;
+    const urlBase           = getTenantLink(req) + link + '/attachments';
+    const isComponent       = (typeof req.body.isComponent       === 'undefined') ? false : (req.body.isComponent == 'true');
+    const fileId            = (typeof req.body.fileId            === 'undefined') ? '' : req.body.fileId;
+    const filename          = (typeof req.body.filename          === 'undefined') ? '' : req.body.filename;
+    const suffixPrimaryFile = (typeof req.body.suffixPrimaryFile === 'undefined') ? ['.iam.dwf', '.iam.dwfx', '.ipt.dwf', '.ipt.dwfx'] : req.body.suffixPrimaryFile;
+    const extensionsIn      = (typeof req.body.extensionsIn      === 'undefined') ? ['dwf', 'dwfx', 'nwd', 'iam', 'ipt', 'stp', 'step', 'sldprt', 'pdf'] : req.body.extensionsIn;
+    const extensionsEx      = (typeof req.body.extensionsEx      === 'undefined') ? [] : req.body.extensionsEx;
+    const useVaultViewer    = req.app.locals.vaultViewer || false;
 
-    let headers = getCustomHeaders(req);
-        headers.Accept = 'application/vnd.autodesk.plm.attachments.bulk+json';
+    if(useVaultViewer) {
 
-    axios.get(urlBase + '?asc=name', { headers : headers }).then(function(response) {
+        getVaultItemViewables(req, res, link);
 
-        if(response.data !== '') {
+    } else if(isComponent) {
 
-            let viewables = [];
-            let requests  = [];
-            let iPrimary  = 1000;
+        axios.get(getTenantLink(req) + link + '/designs', { 
+            headers : req.session.headers 
+        }).then(function(response) {
+            for(let viewable of response.data) {
+                viewable.urn   = viewable.encodedDesignUrn;
+                viewable.token = req.session.headers.token;
+            }
+            sendResponse(req, res, response, false);
+        }).catch(function(error) {
+            sendResponse(req, res, error.response, true);
+        });
 
-            headers.Accept = 'application/vnd.autodesk.plm.attachment.viewable+json';
+    } else {
 
-            for(let i = 0; i < response.data.attachments.length; i++) {
+        let headers = getCustomHeaders(req);
+            headers.Accept = 'application/vnd.autodesk.plm.attachments.bulk+json';
 
-                let attachment = response.data.attachments[i];
+        axios.get(urlBase + '?asc=name', { headers : headers }).then(function(response) {
 
-                if(attachment.type.extension !== null) {
+            if(response.data !== '') {
 
-                    let include   = false;
-                    let primary   = false;
-                    let extension = attachment.type.extension.toLowerCase().split('.').pop();
-                        extension = extension.toLowerCase();
+                let viewables = [];
+                let requests  = [];
+                let iPrimary  = 1000;
 
-                    if(fileId !== filename) {
-                        if((attachment.id === fileId) || (attachment.resourceName == filename)) {
-                            include = true;
-                            primary = true;
-                        }
-                    } else if(extensionsIn.length === 0 || extensionsIn.includes(extension)) {
-                        if(extensionsEx.length === 0 || !extensionsEx.includes(extension)) {
-                            include = true;
-                            for(let index in suffixPrimaryFile) {
-                                let suffix = suffixPrimaryFile[index].toLowerCase();
-                                if(attachment.name.toLowerCase().endsWith(suffix)) {
-                                    if(index < iPrimary) {
-                                        iPrimary = index;
-                                        primary = true;
-                                        for(let viewable of viewables) viewable.primary = false;
+                headers.Accept = 'application/vnd.autodesk.plm.attachment.viewable+json';
+
+                for(let i = 0; i < response.data.attachments.length; i++) {
+
+                    let attachment = response.data.attachments[i];
+
+                    if(attachment.type.extension !== null) {
+
+                        let include   = false;
+                        let primary   = false;
+                        let extension = attachment.type.extension.toLowerCase().split('.').pop();
+                            extension = extension.toLowerCase();
+
+                        if(fileId !== filename) {
+                            if((attachment.id === fileId) || (attachment.resourceName == filename)) {
+                                include = true;
+                                primary = true;
+                            }
+                        } else if(extensionsIn.length === 0 || extensionsIn.includes(extension)) {
+                            if(extensionsEx.length === 0 || !extensionsEx.includes(extension)) {
+                                include = true;
+                                for(let index in suffixPrimaryFile) {
+                                    let suffix = suffixPrimaryFile[index].toLowerCase();
+                                    if(attachment.name.toLowerCase().endsWith(suffix)) {
+                                        if(index < iPrimary) {
+                                            iPrimary = index;
+                                            primary = true;
+                                            for(let viewable of viewables) viewable.primary = false;
+                                        }
                                     }
                                 }
                             }
                         }
+
+                        if(include) {
+
+                            viewables.push({
+                                id           : attachment.id,
+                                name         : attachment.name,
+                                resourceName : attachment.resourceName,
+                                description  : attachment.description,
+                                version      : attachment.version,
+                                user         : attachment.created.user.title,
+                                type         : attachment.type.fileType,
+                                extension    : attachment.type.extension,
+                                primary      : primary,
+                                size         : attachment.size,
+                                thumbnail    : attachment.thumbnails.large,
+                                timestamp    : attachment.created.timeStamp,
+                                token        : req.session.headers.token,
+                                status       : '',
+                                urn          : ''
+                            });
+
+                            if(attachment.type.fileType != 'Adobe PDF') requests.push(axios.get(urlBase + '/' + attachment.id, { headers : headers}));
+
+                        }
+                        
                     }
-
-                    if(include) {
-
-                        viewables.push({
-                            id           : attachment.id,
-                            name         : attachment.name,
-                            resourceName : attachment.resourceName,
-                            description  : attachment.description,
-                            version      : attachment.version,
-                            user         : attachment.created.user.title,
-                            type         : attachment.type.fileType,
-                            extension    : attachment.type.extension,
-                            primary      : primary,
-                            size         : attachment.size,
-                            thumbnail    : attachment.thumbnails.large,
-                            timestamp    : attachment.created.timeStamp,
-                            token        : req.session.headers.token,
-                            status       : '',
-                            urn          : ''
-                        });
-
-                        if(attachment.type.fileType != 'Adobe PDF') requests.push(axios.get(urlBase + '/' + attachment.id, { headers : headers}));
-
-                    }
-                    
                 }
+
+                Promise.all(requests).then(function(responses) {
+
+                    let hasPrimary = false;
+
+                    for(let viewable of viewables) {
+
+                        if(viewable.primary) hasPrimary = true;
+
+                        for(let response of responses) {
+                            if((viewable.name === response.data.fileName) || ((viewable.name + viewable.extension) === response.data.fileName)) {
+                                viewable.status = response.data.status;
+                                viewable.urn    = response.data.fileUrn;
+                            }
+                        }
+                        
+                        if(viewable.type == 'Adobe PDF') {
+                            viewable.filename = viewable.name.split('.pdf')[0] + '-V' + viewable.version + '.pdf';
+                            viewable.link     = 'storage/images/' + viewable.filename;
+                            viewable.status   = validateFileInCache(viewable.filename) ? 'DONE' : 'PENDING';
+                        }
+
+                    }
+
+                    if(viewables.length > 0) {
+                        if(!hasPrimary) viewables[0].primary = true;
+                    }
+
+                    sendResponse(req, res, { data : viewables }, false);
+
+                });
+
+            } else {
+                sendResponse(req, res, { data : [] , status : response.status }, false);
             }
 
-            Promise.all(requests).then(function(responses) {
+        }).catch(function(error) {
+            sendResponse(req, res, error.response, true);
+        });
+    
+    }
 
-                let hasPrimary = false;
+});
+async function getVaultItemViewables(req, res, link) {
 
-                for(let viewable of viewables) {
+    await getVaultId(req);
 
-                    if(viewable.primary) hasPrimary = true;
 
-                    for(let response of responses) {
-                        if((viewable.name === response.data.fileName) || ((viewable.name + viewable.extension) === response.data.fileName)) {
-                            viewable.status = response.data.status;
-                            viewable.urn    = response.data.fileUrn;
-                        }
-                    }
-                    
-                    if(viewable.type == 'Adobe PDF') {
-                        viewable.filename = viewable.name.split('.pdf')[0] + '-V' + viewable.version + '.pdf';
-                        viewable.link     = 'storage/cache/' + viewable.filename;
-                        viewable.status   = validateFileInCache(viewable.filename) ? 'DONE' : 'PENDING';
-                    }
-
+    // Get Vault Item ID
+    let pdmItemID = await axios.get(getTenantLink(req) + link, { 
+        headers : req.session.headers 
+    }).then(function(response) {
+        let result = '';
+        for(let section of response.data.sections) {
+            for(let field of section.fields) {
+                let fieldId = field.__self__.split('/').pop();
+                if(fieldId === 'PDM_ITEM_ID') {
+                    result = field.value;
+                    break;
                 }
+            }
+        }
+        return result;
+    });
 
-                if(viewables.length > 0) {
-                    if(!hasPrimary) viewables[0].primary = true;
-                }
+    if(pdmItemID === '') {
+        sendResponse(req, res, { message : 'Could not find matching Vault item as field PDM_ITEM_ID is empty'}, true);
+        return null;
+    }
 
-                sendResponse(req, res, { data : viewables }, false);
 
-            });
+    let response = { data : [] };
+    const url    = req.app.locals.vaultGateway + '/AutodeskDM/Services/api/vault/v2/vaults/' + req.session.vaultId + '/item-versions/' + pdmItemID + '/associated-files';
 
-        } else {
-            sendResponse(req, res, { data : [] , status : response.status }, false);
+    let files = await axios.get(url, {
+        headers        : req.session.headers,
+        validateStatus : function() { return true; }
+    });
+
+    if(files.status !== 200) {
+        sendResponse(req, res, { message : 'Failed retrieving files of selected item in Vault in function getVaultItemViewables()' }, true);
+        return null;     
+    }
+
+    for(let file of files.data.results) {
+
+        let result = {
+            primary : (file.itemAssociationType === 'Primary'),
+            url     : file.file.url
         }
 
-    }).catch(function(error) {
-        sendResponse(req, res, error.response, true);
-    });
-    
-});
+        if(result.primary) {
+        
+            let visualizations = await axios.get(req.app.locals.vaultGateway + result.url + '/visualization-attachments', {
+                headers        : req.session.headers,
+                validateStatus : function() { return true; }
+            });
+
+            if(visualizations.data.results.length > 0) {
+                result.status = 'PENDING';
+                result.source = 'Vault';
+                result.svf    = visualizations?.data?.results[0];
+                result.type   = 'svf';
+            }
+
+        }
+
+        response.data.push(result);
+
+    }
+
+    sendResponse(req, res, response, false);
+
+}
 
 
 /* ----- BOM VIEWS LIST ----- */
@@ -3612,8 +4294,8 @@ router.get('/bom-views', function(req, res, next) {
 
     if(notCached(req, res)) {
     
-        let wsId = (typeof req.query.link !== 'undefined') ? req.query.link.split('/')[4] : req.query.wsId;
-        let url  = getTenantLink(req) + '/api/v3/workspaces/' + wsId + '/views/5';
+        const wsId = req.query.wsId || req.query.link.split('/')[4] || '';
+        const url  = getTenantLink(req) + '/api/v3/workspaces/' + wsId + '/views/5';
         
         axios.get(url, {
             headers : req.session.headers
@@ -3819,11 +4501,14 @@ router.get('/bom', function(req, res, next) {
     console.log('  req.query.wsId            = ' + req.query.wsId);
     console.log('  req.query.dmsId           = ' + req.query.dmsId);
     console.log('  req.query.link            = ' + req.query.link);
+    console.log('  req.query.isComponent     = ' + req.query.isComponent);
+    console.log('  req.query.componentId     = ' + req.query.componentId);
     console.log('  req.query.depth           = ' + req.query.depth);
     console.log('  req.query.revisionBias    = ' + req.query.revisionBias);
     console.log('  req.query.effectiveDate   = ' + req.query.effectiveDate);
     console.log('  req.query.viewId          = ' + req.query.viewId);
     console.log('  req.query.getBOMPartsList = ' + req.query.getBOMPartsList);
+    console.log('  req.query.hideRoot        = ' + req.query.hideRoot);
     console.log('  req.query.useCache        = ' + req.query.useCache);
     console.log('  req.query.updateCache     = ' + req.query.updateCache);
     console.log('  req.query.sharedCache     = ' + req.query.sharedCache);
@@ -3832,52 +4517,273 @@ router.get('/bom', function(req, res, next) {
 
     if(notCached(req, res)) {
 
+        let isComponent  = (typeof req.query.isComponent     === 'undefined') ? false : (req.query.isComponent == 'true');
+        let componentId  = (typeof req.query.componentId     !== 'undefined') ? req.query.componentId : '';
         let workspaceId  = (typeof req.query.wsId            !== 'undefined') ? req.query.wsId : req.query.link.split('/')[4];
         let link         = (typeof req.query.link            !== 'undefined') ? req.query.link : '/api/v3/workspaces/' + req.query.wsId + '/items/' + req.query.dmsId;
         let revisionBias = (typeof req.query.revisionBias    !== 'undefined') ? req.query.revisionBias : 'release';
         let depth        = (typeof req.query.depth           !== 'undefined') ? req.query.depth : 10;
-        let getPartsList = (typeof req.query.getBOMPartsList !== 'undefined') ? req.query.getBOMPartsList : false;
+        let getPartsList = (typeof req.query.getBOMPartsList !== 'undefined') ? (req.query.getBOMPartsList == 'true') : false;
+        let hideRoot     = (typeof req.query.hideRoot        !== 'undefined') ? (req.query.hideRoot == 'true') : false;
         let rootId       = (typeof req.query.link            !== 'undefined') ? req.query.link.split('/')[6] : req.query.dmsId;
         let viewId       = (typeof req.query.viewId          !== 'undefined') ? req.query.viewId : '';
-        let urlBOM       = getTenantLink(req) + link + '/bom?depth=' + depth + '&revisionBias=' + revisionBias + '&rootId=' + rootId;
-        let headers      = getCustomHeaders(req);
+        let requests     = [];
 
-        if(viewId !== '') urlBOM += '&viewDefId=' + viewId;
-        if(typeof req.query.effectiveDate !== 'undefined') urlBOM += '&effectiveDate=' + req.query.effectiveDate;
+        if(!isComponent) {
 
-        headers.Accept = 'application/vnd.autodesk.plm.bom.bulk+json';
+            let urlBOM       = getTenantLink(req) + link + '/bom?depth=' + depth + '&revisionBias=' + revisionBias + '&rootId=' + rootId;
+            let headers      = getCustomHeaders(req);
 
-        let requests = [];
+            if(viewId !== '') urlBOM += '&viewDefId=' + viewId;
+            if(typeof req.query.effectiveDate !== 'undefined') urlBOM += '&effectiveDate=' + req.query.effectiveDate;
 
-        requests.push(runPromised(urlBOM, headers));
+            headers.Accept = 'application/vnd.autodesk.plm.bom.bulk+json';
 
-        if(getPartsList) {
-            if(viewId !== '') {
-                let urlView = getTenantLink(req) + '/api/v3/workspaces/' + workspaceId + '/views/5/viewdef/' + viewId + '/fields';
-                requests.push(runPromised(urlView, req.session.headers)); 
+            requests.push(runPromised(urlBOM, headers));
+
+            if(getPartsList) {
+                if(viewId !== '') {
+                    let urlView = getTenantLink(req) + '/api/v3/workspaces/' + workspaceId + '/views/5/viewdef/' + viewId + '/fields';
+                    requests.push(runPromised(urlView, req.session.headers)); 
+                }
             }
+
+            Promise.all(requests).then(function(responses) {
+
+                sortArray(responses[0].data.edges, 'itemNumber', '');
+                sortArray(responses[0].data.edges, 'depth', '');
+
+                responses[0].data.bomPartsList = [];
+
+                if(responses.length > 1) {
+
+                    responses[0].data.bomPartsList = getBOMPartsList(responses[0].data, responses[1].data, hideRoot);
+                    sendResponse(req, res, responses[0], false);
+
+
+                } else sendResponse(req, res, responses[0], false);
+
+            }).catch(function(error) {
+                sendResponse(req, res, error.response, true);
+            });
+
+        } else {
+
+            if(componentId === '') {
+                requests.push(axios.get(getTenantLink(req) + link, { headers : req.session.headers }));
+            }
+
+            Promise.all(requests).then(function(responses) {
+
+                componentId = responses[0].data.componentId;
+    
+                axios.post(urlGraphQL, {
+                    query : `query CDE_BOM_GetComponentStructure($componentId: ID!, $composition: BOMCompositionEnum!, $depth: Int, $time: DateTime, $cursor: String) {
+                            component(componentId: $componentId, composition: $composition, time: $time) {
+                                ...ComponentStructure
+                                ...BomRelations
+                            }
+                        }
+
+                        fragment OverrideableProperty on Property {
+                            name
+                            value
+                            displayValue
+                            definition {
+                            id
+                            }
+                        }
+
+                        fragment ComponentStructure on Component {
+                            id
+                            composition
+                            hasChildren
+                            componentState
+                            baseProperties {
+                                results {
+                                    name
+                                    displayValue
+                                }
+                            }
+                            name {
+                                value
+                            }
+                            itemNumber {
+                                id
+                            }
+                            lifecycle {
+                                itemUrl
+                            }
+                            primaryModel {
+                                id
+                            }
+                            isTip
+                        }
+
+                        fragment BomRelations on Component {
+                            bomRelations(depth: $depth, pagination: {cursor: $cursor}) {
+                                pagination {
+                                    cursor
+                                }
+                                results {
+                                    id
+                                    quantityProperty {
+                                        ...OverrideableProperty
+                                    }
+                                    sequenceNumber
+                                    fromComponent {
+                                        id
+                                    }
+                                    toComponent {
+                                        ...ComponentStructure
+                                    }
+                                    toComponentState
+                                }
+                        }
+                    }`,
+                       
+                    variables : {
+                        componentId : componentId,
+                        composition : 'WORKING',
+                        depth       : 1,
+                        cursor      : null,
+                        time        : null
+                    }
+
+                },{
+                    headers: req.session.headers
+                }).then(function(response) {
+                    let bomPartsList = getComponentBOMPartsList(response.data, [], false);
+                    response.data.bomPartsList = bomPartsList;
+                    sendResponse(req, res, response, false);
+                }).catch(function(error) {
+                    sendResponse(req, res, error.response, true);      
+                });
+
+            });
+
         }
-
-        Promise.all(requests).then(function(responses) {
-
-            sortArray(responses[0].data.edges, 'itemNumber', '');
-            sortArray(responses[0].data.edges, 'depth', '');
-
-            if(responses.length > 1) {
-
-                responses[0].data.bomPartsList = getBOMPartsList(responses[0].data, responses[1].data, null);
-                sendResponse(req, res, responses[0], false);
-
-
-            } else sendResponse(req, res, responses[0], false);
-
-        }).catch(function(error) {
-            sendResponse(req, res, error.response, true);
-        });
 
     }
     
 });
+function getComponentBOMPartsList(data, fields, hideRoot) {
+
+    if(isBlank(hideRoot)) hideRoot = false;
+
+    let parts     = [];
+    let component = data.data.component;
+    let itemUrl   = component.lifecycle.itemUrl;
+    let dmsId     = itemUrl.split('.').pop().split('&')[0];
+
+    let node = { 
+        link          : '/api/v3/workspaces/57/items/' + dmsId,
+        isComponent   : true,
+        componentId   : component.id,
+        modelId       : component.primaryModel.id,
+        partNumber    : component.name.value,
+        linkParent    : '',
+        level         : 0,
+        quantity      : '0',
+        parent        : '',
+        parents       : [],
+        fields        : [],
+        edgeId        : null,
+        number        : null,
+        numberPath    : '',
+        details       : {},
+        totalQuantity : 0,
+        hasChildren   : (component.bomRelations.results.length > 0)
+    }
+
+    node.path = node.partNumber;
+
+    // for(let relationship of data.nodes) {
+    //     if(bomNode.item.urn === urnRoot) {
+    //         insertBOMPartDetails(fields, node, bomNode, null);
+    //         break;
+    //     }
+    // }
+
+    if(!hideRoot) parts.push(node);
+
+    getComponentBOMParts(fields, component, component.id, parts, 1.0, 1, '', [node.partNumber]);
+
+    return parts;
+
+}
+function getComponentBOMParts(fields, component, parentId, parts, quantity, level, numberPath, parents) {
+
+    let result = { hasChildren : false };
+    let number = 1;
+
+    for(let relationship of component.bomRelations.results) {
+
+        if(relationship.fromComponent.id === parentId) {
+
+            let toComponent = relationship.toComponent;
+            let itemUrl     = toComponent.lifecycle.itemUrl;
+            let dmsId       = itemUrl.split('.').pop().split('&')[0];
+
+            let node = { 
+                isComponent : true,
+                link        : '/api/v3/workspaces/57/items/' + dmsId,
+                componentId : toComponent.id,
+                modelId     : toComponent.primaryModel.id,
+                partNumber  : toComponent.name.value,
+                level       : level,
+                quantity    : relationship.quantityProperty.value,
+                title       : toComponent.itemNumber.id + ' - ' + toComponent.name.value,
+                parent      : parents[parents.length - 1],
+                parents     : parents.slice(),
+                fields      : [],
+                number      : number++,
+                numberPath  : numberPath + number,
+                hasChildren : toComponent.hasChildren,
+                details     : { name :toComponent.name.value }
+            }
+
+            node.totalQuantity = node.quantity * quantity;
+
+            // node.path = node.parents.map(function(parent) {
+            //     return parent;
+            // }).join('|') + '|' + node.partNumber;
+
+            result.hasChildren = true;
+
+            // for(let bomNode of nodes) {
+
+            //     if(bomNode.item.urn === edge.child) {
+            //         insertBOMPartDetails(fields, node, bomNode, edge);
+            //         break;
+            //     }
+            // }
+
+            // if(!isBlank(selectItems)) {      
+            //     if(selectItems.hasOwnProperty('values')) {
+            //         let selectValue = getBOMCellValue(edge.child, urns.selectItems, nodes);
+            //         if(selectValue === '') selectValue = getBOMEdgeValue(edge, urns.selectItems, 'title', '');
+            //         if(selectItems.values.includes(selectValue)) parts.push(node);
+            //     } else parts.push(node);
+            // } else {
+                parts.push(node);
+            // }
+
+            let nextParents = parents.slice();
+                nextParents.push(node.partNumber);
+
+                // fields, model, parentId, parts, quantity, level, numberPath, parents
+
+            // let nodeBOM = getBOMParts(fields, selectItems, iEdge, urns, parts, edge.child, edges, nodes, node.totalQuantity, level + 1, numberPath + edge.itemNumber + '.', nextParents);
+            let nodeBOM = getComponentBOMParts(fields, component, node.id, parts, node.totalQuantity, level + 1, numberPath + '1' + '.', nextParents);
+
+        }
+
+    }
+
+    return result;
+
+}
 
 
 /* ----- FLAT BOM DATA ----- */
@@ -3929,8 +4835,6 @@ router.get('/bom-item', function(req, res, next) {
 
     let url = (typeof req.query.link !== 'undefined') ? req.query.link : req.app.locals.tenantLink + '/api/v3/workspaces/' + req.query.wsId + '/items/' + req.query.dmsId + '/bom-items/' + req.query.edgeId;
 
-    console.log(url);
-
     axios.get(url, {
         headers : req.session.headers
     }).then(function(response) {
@@ -3952,8 +4856,6 @@ router.get('/bom-edge', function(req, res, next) {
     console.log();
 
     let url = req.app.locals.tenantLink + req.query.edgeLink;
-
-    console.log(url);
 
     axios.get(url, {
         headers : req.session.headers
@@ -4100,23 +5002,23 @@ router.post('/bom-update', function(req, res, next) {
 
 
 /* ----- REMOVE BOM ITEM ----- */
-router.get('/bom-remove', function(req, res, next) {
+router.post('/bom-remove', function(req, res, next) {
     
     console.log(' ');
     console.log('  /bom-remove');
     console.log(' --------------------------------------------');  
-    console.log('  req.query.wsId     = ' + req.query.wsId);
-    console.log('  req.query.dmsId    = ' + req.query.dmsId);
-    console.log('  req.query.link     = ' + req.query.link);
-    console.log('  req.query.edgeId   = ' + req.query.edgeId);
-    console.log('  req.query.edgeLink = ' + req.query.edgeLink);
+    console.log('  req.body.wsId     = ' + req.body.wsId);
+    console.log('  req.body.dmsId    = ' + req.body.dmsId);
+    console.log('  req.body.link     = ' + req.body.link);
+    console.log('  req.body.edgeId   = ' + req.body.edgeId);
+    console.log('  req.body.edgeLink = ' + req.body.edgeLink);
     console.log();
 
-    let edgeLink = req.query.edgeLink;
+    let edgeLink = req.body.edgeLink;
 
     if (typeof edgeLink === 'undefined') {
-        edgeLink  = (typeof req.query.link !== 'undefined') ? req.query.link : '/api/v3/workspaces/' + req.query.wsId + '/items/' + req.query.dmsId;
-        edgeLink += '/bom-items/' + req.query.edgeId;
+        edgeLink  = (typeof req.body.link !== 'undefined') ? req.body.link : '/api/v3/workspaces/' + req.body.wsId + '/items/' + req.body.dmsId;
+        edgeLink += '/bom-items/' + req.body.edgeId;
     }
     
     let url  = req.app.locals.tenantLink + edgeLink;
@@ -4498,7 +5400,7 @@ router.get('/mow', function(req, res, next) {
     console.log(' ');
     console.log('  /mow');
     console.log(' --------------------------------------------'); 
-    console.log('  req.query.userId       = ' + req.query.userId);     
+    console.log('  req.query.userId = ' + req.query.userId);     
     console.log('  ');
 
     let url      = req.app.locals.tenantLink + '/api/v3/users/@me/outstanding-work';
@@ -4609,7 +5511,7 @@ router.get('/recent', function(req, res, next) {
     console.log(' --------------------------------------------');  
     console.log('  req.query.requestor = ' + req.query.requestor);    
     console.log('  ');
-    
+
     let url = req.app.locals.tenantLink + '/api/v3/users/@me/recently-viewed';
     
     axios.get(url, {
@@ -4671,19 +5573,22 @@ router.post('/search', function(req, res) {
     console.log(' ');
     console.log('  /search');
     console.log(' --------------------------------------------');
-    console.log('  req.body.wsId        = ' + req.body.wsId);
-    console.log('  req.body.link        = ' + req.body.link);
-    console.log('  req.body.latest      = ' + req.body.latest);
-    console.log('  req.body.useCache    = ' + req.body.useCache);
-    console.log('  req.body.sort        = ' + req.body.sort);
-    console.log('  req.body.fields      = ' + req.body.fields);
-    console.log('  req.body.grid        = ' + req.body.grid);
-    console.log('  req.body.filter      = ' + req.body.filter);
-    console.log('  req.body.pageNo      = ' + req.body.pageNo);
-    console.log('  req.body.pageSize    = ' + req.body.pageSize);
-    console.log('  req.body.logicClause = ' + req.body.logicClause);
-    console.log('  req.body.tileImage   = ' + req.body.tileImage);
-    console.log('  req.body.tileImageFieldId = ' + req.body.tileImageFieldId);
+    console.log('  req.body.wsId               = ' + req.body.wsId);
+    console.log('  req.body.link               = ' + req.body.link);
+    console.log('  req.body.searchLogicClause  = ' + req.body.searchLogicClause);
+    console.log('  req.body.searchLatestOnly   = ' + req.body.searchLatestOnly);
+    console.log('  req.body.searchReleasedOnly = ' + req.body.searchReleasedOnly);
+    console.log('  req.body.searchWorkingOnly  = ' + req.body.searchWorkingOnly);
+    console.log('  req.body.hideWorking        = ' + req.body.hideWorking);
+    console.log('  req.body.useCache           = ' + req.body.useCache);
+    console.log('  req.body.sort               = ' + req.body.sort);
+    console.log('  req.body.fields             = ' + req.body.fields);
+    console.log('  req.body.grid               = ' + req.body.grid);
+    console.log('  req.body.filter             = ' + req.body.filter);
+    console.log('  req.body.pageNo             = ' + req.body.pageNo);
+    console.log('  req.body.pageSize           = ' + req.body.pageSize);
+    console.log('  req.body.tileImage          = ' + req.body.tileImage);
+    console.log('  req.body.tileImageFieldId   = ' + req.body.tileImageFieldId);
     console.log();
 
 
@@ -4697,32 +5602,61 @@ router.post('/search', function(req, res) {
         let image  = (typeof req.body.tileImage        === 'undefined') ? false : (req.body.tileImage == 'true');
         let ifId   = (typeof req.body.tileImageFieldId === 'undefined') ? '' : req.body.tileImageFieldId;
         let url    = req.app.locals.tenantLink + '/api/rest/v1/workspaces/' + wsId + '/items/search';
-    
+
+        const searchLatestOnly   = (typeof req.body.searchLatestOnly   === 'undefined') ? false : (req.body.searchLatestOnly   == 'true');
+        const searchReleasedOnly = (typeof req.body.searchReleasedOnly === 'undefined') ? false : (req.body.searchReleasedOnly == 'true');
+        const searchWorkingOnly  = (typeof req.body.searchWorkingOnly  === 'undefined') ? false : (req.body.searchWorkingOnly  == 'true');
+        const hideWorking        = (typeof req.body.hideWorking        === 'undefined') ? false : (req.body.hideWorking        == 'true');
 
         if(!fields.includes('DESCRIPTOR')) fields.push('DESCRIPTOR');
 
         let params = {
-        pageNo      : req.body.pageNo || 1,
-        pageSize    : Number(req.body.pageSize) || 100,
-        logicClause : req.body.logicClause || 'AND',
-        fields      : [],
-        filter      : [],
-        sort        : []
+            pageNo      : req.body.pageNo            || 1,
+            pageSize    : Number(req.body.pageSize)  || 100,
+            logicClause : req.body.searchLogicClause || 'AND',
+            fields      : [],
+            filter      : [],
+            sort        : []
         };
 
         setBodyFields(params, fields, grid);
-        setBodySort(params  , sort);
+        setBodySort  (params, sort);
         setBodyFilter(params, filter);
 
-        if(typeof req.body.latest !== 'undefined') {
-            if(req.body.latest) {
-                params.filter.push({ 
-                    fieldID       : 'LC_RELEASE_LETTER',
-                    fieldTypeID   : '10',
-                    filterType    : { 'filterID' : 20 },
-                    filterValue   : 'true'      
-                }); 
-            }
+        if(searchLatestOnly) {
+            params.filter.push({ 
+                fieldID       : 'LATEST_RELEASE',
+                fieldTypeID   : '10',
+                filterType    : { 'filterID' : 13 },
+                filterValue   : ''     
+            }); 
+        }
+
+        if(searchReleasedOnly) {
+            params.filter.push({ 
+                fieldID       : 'LC_RELEASE_LETTER',
+                fieldTypeID   : '10',
+                filterType    : { 'filterID' : 21 },
+                filterValue   : ''       
+            }); 
+        }
+
+        if(searchWorkingOnly) {
+            params.filter.push({ 
+                fieldID       : 'LC_RELEASE_LETTER',
+                fieldTypeID   : '10',
+                filterType    : { 'filterID' : 20 },
+                filterValue   : ''
+            }); 
+        }
+
+        if(hideWorking) {
+            params.filter.push({ 
+                fieldID       : 'LIFECYCLE_NAME',
+                fieldTypeID   : '10',
+                filterType    : { 'filterID' : 5 },
+                filterValue   : 'Working'       
+            }); 
         }
 
         axios.post(url, params, { 
@@ -4747,7 +5681,7 @@ router.post('/search', function(req, res) {
                             let imageId = field.fieldData.value;
                             if(!isBlank(imageId)) {
                                 let imageFile = wsId + '-' + row.dmsId + '-' + field.key + '-' + imageId + '.jpg';
-                                let exists = fs.existsSync('storage/cache/' + imageFile);
+                                let exists = fs.existsSync('storage/images/' + imageFile);
                                 if(exists) row.imageFile = imageFile;
                             }
                         }
@@ -4756,6 +5690,7 @@ router.post('/search', function(req, res) {
             }
             sendResponse(req, res, { data : result, status : response.status }, false);
         }).catch(function (error) {
+            if(typeof error.response === 'undefined') error.response = {};
             error.response.data = { row : [] };
             sendResponse(req, res, error.response, true);
         });
@@ -4764,8 +5699,7 @@ router.post('/search', function(req, res) {
    
 });
 function setBodyFields(body, fields, grid) {
-   
-//    console.log('/setBodyFields : START');
+
    
    for(let field of fields) {
        body.fields.push({
@@ -4850,8 +5784,6 @@ function setBodySort(body, sorts) {
    
 }
 function setBodyFilter(body, filters) {
-   
-//    console.log(' > START setBodyFilter');
 
    if(typeof filters === 'string') filters = JSON.parse(filters);
    
@@ -5391,17 +6323,25 @@ router.get('/tableaus', function(req, res, next) {
 
 
 /* ----- CREATE INITIAL TABLEAU ----- */
-router.get('/tableau-init', function(req, res, next) {
+router.post('/tableau-init', function(req, res, next) {
     
     console.log(' ');
     console.log('  /tableau-init');
     console.log(' --------------------------------------------');  
-    console.log('  req.query.wsId  = ' + req.query.wsId);
+    console.log('  req.body.wsId   = ' + req.body.wsId);
+    console.log('  req.body.tenant = ' + req.body.tenant);
+    console.log('  req.body.user   = ' + req.body.user);
     
-    let url = req.app.locals.tenantLink + '/api/v3/workspaces/' + req.query.wsId + '/tableaus';
+    let url    = getTenantLink(req)  + '/api/v3/workspaces/' + req.body.wsId + '/tableaus';
+    let headers = getCustomHeaders(req);
+
+    if(typeof req.body.user !== 'undefined') {
+        headers['Authorization'] = req.session.admin;
+        headers['X-user-id']     = req.body.user;
+    }    
     
     axios.post(url, {}, {
-        headers : req.session.headers
+        headers : headers
     }).then(function(response) {
         sendResponse(req, res, response, false);
     }).catch(function(error) {
@@ -5945,7 +6885,7 @@ router.get('/login-admin', function(req, res, next) {
    
     let data = {
         'grant_type' : 'client_credentials',
-        'scope'      : 'profapi:img-profile:read'
+        'scope'      : 'data:read'
     }
     
     axios.post('https://developer.api.autodesk.com/authentication/v2/token', data, {
@@ -6015,7 +6955,7 @@ router.get('/workspace', function(req, res, next) {
 
 
 /* ----- GET WORKSPACES ----- */
-router.get('/workspaces', function(req, res, next) {
+router.get('/workspaces', async function(req, res, next) {
     
     console.log(' ');
     console.log('  /workspaces');
@@ -6029,13 +6969,14 @@ router.get('/workspaces', function(req, res, next) {
 
     if(notCached(req, res)) {
 
-        let offset  = (typeof req.query.offset === 'undefined') ?     0 : req.query.offset;
-        let limit   = (typeof req.query.limit  === 'undefined') ?   250 : req.query.limit;
-        let bulk    = (typeof req.query.bulk   === 'undefined') ? false : req.query.bulk;
-        let url     = getTenantLink(req) + '/api/v3/workspaces?offset=' + offset + '&limit=' + limit;
         let headers = getCustomHeaders(req);
-
+        let offset  = req.query.offset || 0;
+        let limit   = req.query.offset  || 250;
+        let bulk    = (typeof req.query.bulk   === 'undefined') ? false : (req.query.bulk == 'true');
+            
         if(bulk) headers.Accept = 'application/vnd.autodesk.plm.workspaces.bulk+json';
+
+        let url  = getTenantLink(req) + '/api/v3/workspaces?offset=' + offset + '&limit=' + limit;
 
         axios.get(url, {
             headers : headers
@@ -6339,6 +7280,23 @@ router.get('/workspace-lifecycle-transitions', function(req, res, next) {
 });
 
 
+/* ----- DETERMINES IF WORKSPACE IS COMPONENTS WS ----- */
+router.get('/is-component', function(req, res, next) {
+    
+    console.log(' ');
+    console.log('  /is-component');
+    console.log(' --------------------------------------------');
+    console.log('  req.query.wsId = ' + req.query.wsId);
+    console.log('  req.query.link = ' + req.query.link);
+    console.log();
+
+    const wsId = req.query.wsId || req.query.link.split('/')[4] || '';
+
+    sendResponse(req, res, { data : isComponentsWorkspace(req, wsId) }, false);
+    
+});
+
+
 /* ----- GET ALL SCRIPTS ----- */
 router.get('/scripts', function(req, res, next) {
     
@@ -6506,7 +7464,7 @@ router.get('/users', function(req, res, next) {
     if(notCached(req, res)) {   
 
         let bulk       = (typeof req.query.bulk       === 'undefined') ?    true : (req.query.bulk == 'true');
-        let limit      = (typeof req.query.limit      === 'undefined') ?    1000 : req.query.limit;
+        let limit      = (typeof req.query.limit      === 'undefined') ?    2000 : req.query.limit;
         let offset     = (typeof req.query.offset     === 'undefined') ?       0 : req.query.offset;
         let activeOnly = (typeof req.query.activeOnly === 'undefined') ? 'false' : req.query.activeOnly;
         let mappedOnly = (typeof req.query.mappedOnly === 'undefined') ? 'false' : req.query.mappedOnly;
@@ -6517,9 +7475,10 @@ router.get('/users', function(req, res, next) {
             + '&limit='      + limit;
 
         let headers = getCustomHeaders(req);
-            
+        
         if(bulk) headers.Accept = 'application/vnd.autodesk.plm.users.bulk+json';
-
+        else if (typeof req.query.limit !== 'undefined') headers.Accept = '*/*';
+        
         axios.get(url, {
             headers : headers
         }).then(function(response) {
@@ -6670,8 +7629,19 @@ router.get('/me', function(req, res, next) {
         axios.get(url, {
             headers : req.session.headers
         }).then(function(response) {
+            
             response.data.fullName = response.data.lastName + ', ' + response.data.firstName;
+
+            req.session.userInfo = {
+                fullName    : response.data.fullName,
+                displayName : response.data.displayName,
+                email       : response.data.email
+            };
+            
+            req.session.save();
+
             sendResponse(req, res, response, false);
+
         }).catch(function(error) {
             sendResponse(req, res, error.response, true);
         });
@@ -7182,12 +8152,14 @@ function getBOMPartsList(data, fields, selectItems, hideRoot) {
         parent        : '',
         parents       : [],
         fields        : [],
+        attachments   : null,
         edgeId        : null,
         number        : null,
         numberPath    : '',
         details       : {},
         totalQuantity : 0,
-        hasChildren   : (data.edges.length > 0)
+        hasChildren   : (data.edges.length > 0),
+        isComponent   : false
     }
 
     node.path = node.partNumber;
@@ -7226,10 +8198,12 @@ function getBOMParts(fields, selectItems, iEdge, urns, parts, parent, edges, nod
                 parent      : parents[parents.length - 1],
                 parents     : parents.slice(),
                 fields      : [],
+                attachments : null,
                 edgeId      : edge.edgeId,
                 number      : edge.itemNumber,
                 numberPath  : numberPath + edge.itemNumber,
-                details     : {}
+                details     : {},
+                isComponent : false
             }
 
             node.totalQuantity = node.quantity * quantity;
@@ -7281,35 +8255,50 @@ function insertBOMPartDetails(fields, node, bomNode, edge) {
 
     for(let field of fields) {
 
-        let fieldData = {
-            fieldId     : field.fieldId,
-            name        : field.name,
-            displayName : field.displayName,
-            urn         : field.__self__.urn,
-            value       : ''
-        }
-                        
-        node.details[field.fieldId] = null;
+        const fieldTab = field.fieldTab;
+        const fieldId  = field.fieldId;
 
-        for(let nodeField of bomNode.fields) {
-            if(nodeField.metaData.urn === fieldData.urn) {
-                let value = (typeof nodeField.value === 'object') ? nodeField.value.title : nodeField.value;
-                fieldData.value = nodeField.value;
-                node.details[field.fieldId] = value;
-            }
-        }
+        if((fieldTab  === 'SYSTEM') && (fieldId === 'ATTACHMENTS')) {
 
-        if(!isBlank(edge)) {
-            for(let edgeField of edge.fields) {
-                if(edgeField.metaData.urn === fieldData.urn) {
-                    let value = (typeof edgeField.value === 'object') ? edgeField.value.title : edgeField.value;
-                    fieldData.value = edgeField.value;
-                    node.details[field.fieldId] = value;
+            for(let nodeField of bomNode.fields) {
+                if(nodeField.metaData.urn === field.__self__.urn) {
+                    node.attachments = JSON.parse(nodeField.content || []);
                 }
             }
+
+        } else {
+
+            let fieldData = {
+                fieldId     : fieldId,
+                name        : field.name,
+                displayName : field.displayName,
+                urn         : field.__self__.urn,
+                value       : ''
+            }
+                            
+            node.details[fieldId] = null;
+
+            for(let nodeField of bomNode.fields) {
+                if(nodeField.metaData.urn === fieldData.urn) {
+                    let value = (typeof nodeField.value === 'object') ? nodeField.value.title : nodeField.value;
+                    fieldData.value = nodeField.value;
+                    node.details[fieldId] = value;
+                }
+            }
+
+            if(!isBlank(edge)) {
+                for(let edgeField of edge.fields) {
+                    if(edgeField.metaData.urn === fieldData.urn) {
+                        let value = (typeof edgeField.value === 'object') ? edgeField.value.title : edgeField.value;
+                        fieldData.value = edgeField.value;
+                        node.details[fieldId] = value;
+                    }
+                }
+            }
+                            
+            node.fields.push(fieldData);
+
         }
-                        
-        node.fields.push(fieldData);
 
     }
 
@@ -7560,3 +8549,4 @@ function getWorkspaceTypeLabel(workspace) {
 
 
 module.exports = router;
+module.exports.clearSharedCaches = clearSharedCaches;

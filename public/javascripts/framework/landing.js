@@ -1,8 +1,9 @@
 $(document).ready(function() {
 
-         if(theme.toLowerCase() ===  'dark') { $('body').addClass( 'dark-theme'); theme =  'dark'; }
-    else if(theme.toLowerCase() === 'black') { $('body').addClass('black-theme'); theme = 'black'; }
-    else                                     { $('body').addClass('light-theme'); theme = 'light'; }
+         if(theme.toLowerCase() ===  'dark' ) { $('body').addClass( 'dark-theme' ); theme =  'dark' ; }
+    else if(theme.toLowerCase() === 'black' ) { $('body').addClass('black-theme' ); theme = 'black' ; }
+    else if(theme.toLowerCase() === 'fusion') { $('body').addClass('fusion-theme'); theme = 'fusion'; }
+    else                                      { $('body').addClass('light-theme' ); theme = 'light' ; }
 
     updateLinks();
 
@@ -16,7 +17,7 @@ $(document).ready(function() {
 
     $('#chrome').click(function() {
         let href = document.location.href.split('?');
-        let base = href[0] += 'chrome-extension';
+        let base = href[0] += 'docs/chrome-extension';
 
         if(href.length > 1) base += '?' + href[1];
         
@@ -32,6 +33,7 @@ $(document).ready(function() {
         $('body').removeClass('dark-theme');
         $('body').removeClass('black-theme');
         $('body').removeClass('light-theme');
+        $('body').removeClass('fusion-theme');
         $('body').addClass($(this).val() + '-theme');
 
         theme = $(this).val();
@@ -50,6 +52,39 @@ $(document).ready(function() {
         });
 
     });
+
+    $('#monitoring-docs').click(function() {
+
+        let href = document.location.href.split('?');
+        let base = href[0] += 'docs/monitoring';
+
+        if(href.length > 1) base += '?' + href[1];
+        
+        window.open(base);
+        
+    });  
+         
+    $('#monitoring-open').click(function() {
+
+        let href = document.location.href.split('?');
+        let base = href[0] += 'monitoring';
+
+        if(href.length > 1) base += '?' + href[1];
+        
+        window.open(base);
+        
+    });        
+
+    $('#studio').click(function() {
+
+        let href = document.location.href.split('?');
+        let base = href[0] += 'studio';
+
+        if(href.length > 1) base += '?' + href[1];
+        
+        window.open(base);
+        
+    });    
 
     $('#troubleshooting').click(function() {
         let href = document.location.href.split('?');
@@ -189,6 +224,8 @@ $(document).ready(function() {
             if(url.indexOf('theme=') < 0) {
                 url += concat + 'theme=' + $('#theme-selector').val();
             }
+
+            url = updateURLParameter(url, 'theme', $('#theme-selector').val());
 
         }
 

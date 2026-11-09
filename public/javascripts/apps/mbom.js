@@ -1,56 +1,7 @@
-let maxRequests = 5;
-
-let paramsSummary = {
-    id       : 'details',
-    contents : [ { 
-        type   : 'details', 
-        params : {
-            id               : 'details-details', 
-            collapseContents : true, 
-            hideHeader       : true,
-            layout           : 'narrow'
-        }
-    },{
-        type   : 'attachments',
-        params : { 
-            id               : 'details-attachments', 
-            contentSize      : 's',
-            editable         : true, 
-            reload           : true, 
-            uploadScreenshot : true, 
-            singleToolbar    : 'controls'
-        }
-    }],
-    layout           : 'tabs',
-    hideSubtitle     : true,
-    hideCloseButton  : true,
-    openInPLM        : true,
-    bookmark         : true,
-    saveTabSelection : true
-}
-let paramsoperationsSourcing = {
-    id               : 'operations-sourcing',
-    headerLabel      : 'Suppliers',
-    reload           : true,
-    openInPLM        : true,
-    layout           : 'table',
-    contentSize      : 'm',
-    fieldsEx         : ['Manufacturer Part Number']
-}
-let paramsoperationsGrid = {
-    id               : 'operations-grid',
-    headerLabel      : 'List of Operations',
-    editable         : true,
-    hideButtonLabels : true,
-    reload           : true,
-    multiSelect      : true,
-    openInPLM        : true,
-    useCache         : true,
-    singleToolbar    : 'controls'
-}
-
+let maxRequests        = 5;
 let ebomPartsList      = [];
 let mbomPartsList      = [];
+let templatePartsList  = [];
 let picklistMakeBuy    = [];
 let wsEBOM             = { id : '', sections : [], fields : [], viewId : '', viewFields : [] };
 let wsMBOM             = { id : '', sections : [], fields : [], viewId : '', viewFields : [] };
@@ -65,6 +16,9 @@ let siteSuffix         = '';
 let siteLabel          = '';
 let effectiveDate      = '';
 let revisionBias       = '';
+let paramsSummary      = {}
+let paramsSourcing     = {}
+let paramsGrid         = {}
 
 let pendingActions, pendingRemovals;
 
@@ -76,12 +30,21 @@ $(document).ready(function() {
         if(param[0].toLowerCase() === 'site') {
             siteSuffix = '_' + param[1];
             siteLabel        = param[1];
+            $('#mbom .panel-title-main').html('Manufacturing BOM [' + siteLabel + ']');
         }
     }
 
     wsEBOM.wsId = config.workspaceEBOM.workspaceId || common.workspaceIds.items
     wsMBOM.wsId = config.workspaceMBOM.workspaceId || common.workspaceIds.items;
     links.start = urlParameters.link;
+
+    paramsSummary  = config.panels.itemDetailsPanel;
+    paramsSourcing = config.panels.listSuppliers;
+    paramsGrid     = config.panels.listOperations;
+
+    paramsSummary.id  = 'details';
+    paramsSourcing.id = 'operations-sourcing';
+    paramsGrid.id     = 'operations-grid';
 
     appendProcessing('ebom', false);
     appendProcessing('mbom', false);
@@ -98,6 +61,7 @@ $(document).ready(function() {
     getFeatureSettings('mbom', requests, function(responses) {
 
         insertSearchFilters();
+        insertTemplates();
         setUIEvents();
 
         if( config.displayOptions.tabDisassemble  ) $('#mode-disassemble' ).removeClass('hidden');
@@ -107,8 +71,8 @@ $(document).ready(function() {
         let fieldIdEBOM = urlParameters.contextfieldidebom || config.workspaceMBOM.fieldIDs.ebom;
         let fieldIdMBOM = urlParameters.contextfieldidmbom || config.workspaceEBOM.fieldIDs.mbom;
 
-        links.ebom    = getSectionFieldValue(responses[0].data.sections, fieldIdEBOM, '', 'link');
-        links.mbom    = getSectionFieldValue(responses[0].data.sections, fieldIdMBOM + siteSuffix, '', 'link');
+        links.ebom = getSectionFieldValue(responses[0].data.sections, fieldIdEBOM, '', 'link');
+        links.mbom = getSectionFieldValue(responses[0].data.sections, fieldIdMBOM + siteSuffix, '', 'link');
 
         if(urlParameters.wsId == wsEBOM.wsId) {
             if(isBlank(links.ebom)) {
@@ -286,12 +250,29 @@ function setUIEvents() {
     })  
 
 
+    // MBOM Templates
+    $('#insert-template').click(function() {
+        $('#dialog-templates').show();
+        $('#overlay').show();
+    });    
+    $('#template-cancel').click(function() {
+        $('#dialog-templates').hide();
+        $('#overlay').hide();
+    });    
+    $('#template-confirm').click(function() {
+        if($(this).hasClass('disabled')) return;
+        $('#dialog-templates').hide();
+        $('#overlay').hide();
+        confirmTemplate();
+    });    
+
+
     // Controls to add new process in BOM
     $('#mbom-add-process > input').keypress(function (e) { 
         if (e.which == 13) {
             insertNewProcess();
         }
-     });
+    });
     $('#mbom-add-button').click(function (e) { insertNewProcess(); });
 
 
@@ -416,16 +397,16 @@ function getInitialData() {
         
         } else {
 
-            $('#nav-workspace-views-mbom').html(responses[9].data.name);
+            $('#nav-workspace-views-mbom').html(responses[10].data.name);
 
-            for(let view of responses[8].data) {
+            for(let view of responses[9].data) {
                 if(view.name === config.workspaceMBOM.bomView) {
                     wsMBOM.viewId       = view.id;
                     wsMBOM.viewFields  = view.fields;
                 }
             }
 
-            wsMBOM.tableaus = responses[10].data;
+            wsMBOM.tableaus = responses[11].data;
 
             insertWorkspaceViewsOptions('mbom', wsMBOM.tableaus);
 
@@ -543,7 +524,8 @@ function processItemData(itemDetails) {
 
     $('#header-subtitle').html(itemDetails.title);
 
-    basePartNumber = getSectionFieldValue(itemDetails.sections, config.workspaceEBOM.fieldIDs.number, '', null);
+    basePartNumber  = getSectionFieldValue(itemDetails.sections, config.workspaceEBOM.fieldIDs.number, '', null);
+    basePartNumber += (config.suffixMBOMNumber || '') + siteLabel;
 
     insertViewer(links.ebom);
 
@@ -592,7 +574,7 @@ function processItemData(itemDetails) {
             for(let ebomPart of ebomPartsList) {
 
                 ebomPart.bomType  = 'ebom';
-                ebomPart.mbom     = getBOMPartFieldValue(ebomPart, config.workspaceEBOM.fieldIDs.mbom);
+                ebomPart.mbom     = getBOMPartFieldValue(ebomPart, config.workspaceEBOM.fieldIDs.mbom + siteSuffix);
                 ebomPart.type     = ebomPart.details[config.workspaceEBOM.fieldIDs.type    ] || '';
                 ebomPart.category = ebomPart.details[config.workspaceEBOM.fieldIDs.category] || '';
                 ebomPart.code     = ebomPart.details[config.workspaceEBOM.fieldIDs.code    ] || '';
@@ -650,16 +632,7 @@ function createMBOMRoot(ebomItemDetails, callback) {
         
     } else {
 
-        let number = null;
-
-        if(!isBlank(config.workspaceMBOM.fieldIDs.number)) {
-            if(!isBlank(config.suffixMBOMNumber)) {
-                basePartNumber += config.suffixMBOMNumber + siteLabel;
-                number = basePartNumber;
-            }
-        }
-
-        createMBOMForEBOM(ebomItemDetails, number, function(linkMBOM) {
+        createMBOMForEBOM(ebomItemDetails, basePartNumber, function(linkMBOM) {
             links.mbom = linkMBOM;
             storeContextMBOMLink();
             callback();
@@ -695,7 +668,8 @@ function createMBOMForEBOM(ebomItemDetails, number, callback) {
     for(let fieldToCopy of config.mbomRoot.fieldsToCopy) {
         params.fields.push({
             fieldId : fieldToCopy.mbom,
-            value   : getSectionFieldValue(ebomItemDetails.sections, fieldToCopy.ebom)
+            value   : getSectionFieldValue(ebomItemDetails.sections, fieldToCopy.ebom),
+            type    : getSectionFieldType(ebomItemDetails.sections, fieldToCopy.ebom)
         });
     }
 
@@ -809,8 +783,8 @@ function initEditor() {
     insertMBOMNode($('#mbom-tree'), 0, false);
 
     if(config.displayOptions.tabOperations) {
-        insertSourcing(links.mbom, paramsoperationsSourcing);
-        insertGrid(links.mbom, paramsoperationsGrid );
+        insertSourcing(links.mbom, paramsSourcing);
+        insertGrid(links.mbom, paramsGrid );
     }
 
     $('#mbom-tree').find('.item-head').first().attr('id', 'mbom-root-head');
@@ -877,8 +851,8 @@ function editorResetSelection() {
     insertItemSummary(links.mbom, paramsSummary);
 
     if(config.displayOptions.tabOperations) {
-        insertSourcing(links.mbom, paramsoperationsSourcing);
-        insertGrid(links.mbom, paramsoperationsGrid );
+        insertSourcing(links.mbom, paramsSourcing);
+        insertGrid(links.mbom, paramsGrid );
     } 
 
 }
@@ -1876,20 +1850,20 @@ function getBOMNode(node, edge, level, linkEBOMRoot, icon, qty, bomType, isLeaf)
 // }
 function insertFromEBOMToMBOM(elemAction) {
     
-    let elemItem    = elemAction.closest('.item');
-    let code        = elemItem.attr('data-code');
+    let elemItem     = elemAction.closest('.item');
+    let code         = elemItem.attr('data-code');
+    let elemTarget   = $('#mbom').find('.root');
+    let processMatch = false;
     // let category    = elemItem.attr('category');
-    let elemTarget  = $('#mbom').find('.root');
-    let operationMatch = false;
     
     if(code !== '') {
-        if($('.operation').length > 0) {
+        if($('.process').length > 0) {
             
-            $('.operation').each(function() {
-                if(!operationMatch) {
+            $('.process').each(function() {
+                if(!processMatch) {
                     let operationCode = $(this).attr('data-code');
                     if(operationCode === code) {
-                        operationMatch = true;
+                        processMatch = true;
                         elemTarget = $(this); 
                     }
                 };
@@ -1898,7 +1872,7 @@ function insertFromEBOMToMBOM(elemAction) {
         }
     }
 
-    if(!operationMatch) {
+    if(!processMatch) {
         elemTarget = $('.selected-target');
     }
     
@@ -1979,7 +1953,6 @@ function insertFromEBOMToMBOM(elemAction) {
 
     }
     
-
 }
 function updateQuantityFromEBOMToMBOM(elemAction) {
     
@@ -2494,8 +2467,8 @@ function insertMBOMSelectEvent(elemItem) {
         e.preventDefault();
         selectBOMItem($(this), false);
         if(config.displayOptions.tabOperations) {
-            insertSourcing(elemItem.attr('data-link'), paramsoperationsSourcing);
-            insertGrid(elemItem.attr('data-link') , paramsoperationsGrid );
+            insertSourcing(elemItem.attr('data-link'), paramsSourcing);
+            insertGrid(elemItem.attr('data-link') , paramsGrid );
         }
     });
 
@@ -2572,9 +2545,13 @@ function addMBOMShortcut(elemParent) {
             let url = '/mbom'
                 + '?wsId='    + linkMBOM.split('/')[4]
                 + '&dmsId='   + linkMBOM.split('/')[6]
-                + '&theme='   + theme
-                + '&options=' + options;
-                        
+                + '&theme='   + theme;
+                // + '&options=' + options;
+            
+            if(urlParameters.hasOwnProperty('site')) {
+                url += '&options=site:' + urlParameters.site;
+            }
+
             window.open(url);
 
         });
@@ -2655,8 +2632,8 @@ function selectProcess(elemClicked) {
             insertItemSummary(itemLink, paramsSummary);
 
             if(config.displayOptions.tabOperations) {
-                insertSourcing(itemLink, paramsoperationsSourcing);
-                insertGrid(itemLink, paramsoperationsGrid );
+                insertSourcing(itemLink, paramsSourcing);
+                insertGrid(itemLink, paramsGrid );
             }    
 
         }        
@@ -2722,7 +2699,7 @@ function selectItem(elemItem, filter) {
             $('.leaf').hide();
             $('.item-has-bom').hide();
             $('.item.root').show();
-            $('.operation').hide();
+            $('.process').hide();
             $('.item.filter').removeClass('filter');
             $('#make-buy-filter').val('all');
             elemItem.addClass('filter');
@@ -2759,8 +2736,8 @@ function selectItem(elemItem, filter) {
                     if(!filter) {
                         selectAdjacentMBOMModels();
                         if(config.displayOptions.tabOperations) {
-                            insertSourcing(elemItem.attr('data-link'), paramsoperationsSourcing);
-                            insertGrid(elemItem.attr('data-link') , paramsoperationsGrid );
+                            insertSourcing(elemItem.attr('data-link'), paramsSourcing);
+                            insertGrid(elemItem.attr('data-link') , paramsGrid );
                         }
                     }
                 } else {
@@ -3147,19 +3124,33 @@ function insertNewProcess() {
     
     if($('#mbom-add-name').val() === '') return;
 
+    let elemNew = insertNewProcessNode($('#mbom-add-name').val(), $('#mbom-add-code').val(), $('#mbom-add-qty').val());
+    
+    selectProcess(elemNew);
+    
+    $('#mbom-add-name').val('');
+    $('#mbom-add-code').val('');
+    $('#mbom-add-qty' ).val('');
+    $('#mbom-add-name').focus();    
+    
+}
+function insertNewProcessNode(title, code, quantity, revision) {
+
     let node = {
         level       : 1,
         bomType     : 'mbom',
-        title       : $('#mbom-add-name').val(),
+        title       : title,
         hasChildren : true,
         isEBOMItem  : false,
         isProcess   : true,
         isLeaf      : false,
         icon        : 'radio-process',
-        code        : $('#mbom-add-code').val(),
-        revision    : '-',
-        quantity    : $('#mbom-add-qty' ).val() || 1
+        code        : code || '',
+        revision    : revision || '-',
+        quantity    : quantity || 1
     }
+
+    console.log(node);
 
     let elemNew = insertBOMPartListNode('mbom', null, node);
     
@@ -3169,14 +3160,9 @@ function insertNewProcess() {
     else elemBOM.append(elemNew);
 
     updateMBOMNumbers();
-    selectProcess(elemNew);
-    
-    $('#mbom-add-name').val('');
-    $('#mbom-add-code').val('');
-    $('#mbom-add-qty' ).val('');
-    $('#mbom-add-name').focus();
-        
-    
+
+    return elemNew;
+
 }
 
 
@@ -3226,16 +3212,75 @@ function setBOMTotalQuantities(linkRoot) {
         }
     });
 
-    if(qtyMBOM === qtyEBOM) {
-        $('#ebom-qty-comparison').html('Total quantity matches in EBOM and MBOM : ' + qtyMBOM); 
-    } else if(qtyMBOM < qtyEBOM) {
-        $('#ebom-qty-comparison').html((qtyEBOM - qtyMBOM) + ' units less in MBOM : (M) ' + qtyMBOM + ' < ' + qtyEBOM + ' (E)'); 
-    } else {
-        $('#ebom-qty-comparison').html((qtyMBOM-qtyEBOM) + ' units more in MBOM : (M) ' + qtyMBOM + ' > ' + qtyEBOM + ' (E)'); 
-    }
+    if(qtyEBOM > -1) {
+        if(qtyMBOM === qtyEBOM) {
+            $('#ebom-qty-comparison').html('Total quantity matches in EBOM and MBOM : ' + qtyMBOM); 
+        } else if(qtyMBOM < qtyEBOM) {
+         $('#ebom-qty-comparison').html((qtyEBOM - qtyMBOM) + ' units less in MBOM : (M) ' + qtyMBOM + ' < ' + qtyEBOM + ' (E)'); 
+        } else {
+            $('#ebom-qty-comparison').html((qtyMBOM-qtyEBOM) + ' units more in MBOM : (M) ' + qtyMBOM + ' > ' + qtyEBOM + ' (E)'); 
+        }
+        $('body').addClass('with-quantity-comparison');
+    } else $('body').removeClass('with-quantity-comparison');
 
 }
 
+
+// Templates Functionality
+function insertTemplates() {
+
+    let params = config.mbomTemplates.paramsList;
+
+    params.id          = 'template-list';
+    params.onClickItem = function(elemClicked) { selectTemplate(elemClicked); };
+
+    insertResults(wsMBOM.wsId, config.mbomTemplates.filters, params);
+
+}
+function selectTemplate(elemClicked) {
+
+    $('#template-confirm').addClass('disabled');
+
+    let link   = elemClicked.attr('data-link');
+    let params = config.mbomTemplates.paramsPreview;
+
+    params.id              = 'template-preview';
+    params.depth           = 1;
+    params.afterCompletion = function(id, data) { completedTemplate(id, data); };
+
+    templatePartsList = [];
+
+    insertBOM(link, params);
+
+}
+function completedTemplate(id, data) {
+
+    $('#template-confirm').removeClass('disabled');
+
+    templatePartsList = data.bomPartsList;
+
+}
+function confirmTemplate() {
+
+    if(templatePartsList.length === 0) return;
+
+    let fieldIdTitle = config.workspaceMBOM.fieldIDs.title;
+    let fieldIdCode  = config.workspaceMBOM.fieldIDs.code;
+
+    templatePartsList.splice(0,1);
+
+    for(let templatePart of templatePartsList) {
+        console.log(templatePart);
+        let title = templatePart.details[fieldIdTitle];
+        if(typeof title === 'undefined') {
+            title = templatePart.title;
+            title = title.split(' [REV')[0];
+            title = title.split(' - ')[1];
+        }
+        insertNewProcessNode(title, templatePart.details[fieldIdCode], templatePart.quantity);
+    }
+    
+}
 
 
 // Drag & Drop functions
@@ -3535,6 +3580,9 @@ function addItemListEntry(link, urn, title, className, elemParent, isProcess) {
 
     let elemItem = $('<div></div>').appendTo(elemParent)
         .addClass('additional-item')
+        .addClass('with-icon')
+        .addClass('icon-wrench')
+        .addClass('filled')
         .attr('data-link', link)
         .attr('data-urn', urn)
         .html(title)
@@ -3742,7 +3790,10 @@ function onViewerSelectionChanged(event) {
 
     if(viewerHideSelected(event)) return;
 
-    if(disableViewerSelectionEvent) return;
+    let panelId        = event.target.panelId;
+    let viewerInstance = getViewerInstance(panelId);
+
+    if(viewerInstance.disableSelectEvent) return;
 
     if(event.dbIdArray.length === 1) {
 
@@ -3754,9 +3805,9 @@ function onViewerSelectionChanged(event) {
 
                 if((event.mouseButton === 0) || isBlank(event.mouseButton)) {
 
-                    disableViewerSelectionEvent = true;
+                    viewerInstance.disableSelectEvent = true;
                     viewerHideModel(partNumber);
-                    disableViewerSelectionEvent = false;
+                    viewerInstance.disableSelectEvent = false;
                     $('#ebom').find('.item.leaf').each(function() {
                         let elemEBOM = $(this);
                         if(elemEBOM.attr('data-part-number') === partNumber) {
@@ -4127,7 +4178,7 @@ function deleteBOMItems() {
             index--;
 
         for(index; index >= 0; index--) {
-            requests.push($.get('/plm/bom-remove', pendingRemovals[index]));
+            requests.push($.post('/plm/bom-remove', pendingRemovals[index]));
             pendingRemovals.splice(index,1);
         }
 
@@ -4226,6 +4277,7 @@ function addBOMItems() {
             for(let response of responses) {
                 if(response.error) {
                     showErrorMessage('Error while adding BOM items', response.message);
+                    printResponseErrorMessagesToConsole(response);
                     endProcessing();
                     return;
                 } else {

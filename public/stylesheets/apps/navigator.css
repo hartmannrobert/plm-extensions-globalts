@@ -86,12 +86,12 @@ body.with-edit #edit    { right : 0px; }
     padding-bottom : 10px;
 }
 #tableau-title .panel-title-main {
-    height : 38px;
+    height : 34px;
 }
 #tableau-selector {
     font-weight     : normal;
-    height          : 38px;
-    line-height     : 38px;;
+    height          : 34px;
+    line-height     : 34px;;
     overflow        : hidden;
     padding         : 0px 10px;
     text-overflow   : ellipsis;
@@ -224,9 +224,10 @@ th.changed .table-column-top {
     background  : var(--color-status-red);
     color       : white;
 }
-.dark-theme  th.changed .table-column-toolbar { background : var(--color-status-red-bright); }
-.black-theme th.changed .table-column-toolbar { background : var(--color-status-red-bright); }
-.light-theme th.changed .table-column-toolbar { background : var(--color-status-red-brighter); }
+.light-theme  th.changed .table-column-toolbar { background : var(--color-status-red-brighter); }
+.dark-theme   th.changed .table-column-toolbar { background : var(--color-status-red-bright); }
+.black-theme  th.changed .table-column-toolbar { background : var(--color-status-red-bright); }
+.fusion-theme th.changed .table-column-toolbar { background : var(--color-status-red-brighter); }
 .table-column-descriptor, 
 .table-column-selector {
     padding : 10px;
@@ -334,11 +335,21 @@ td.first-col  {
 .light-theme #tableau-table th.changed {
     background : var(--color-status-red-brighter);
 }
-.light-theme #tableau-table td.changed, 
+.light-theme #tableau-table td.changed,
 .light-theme #tableau-table td.changed > * {
     background : var(--color-status-red-brighter) !important;
 }
 .light-theme  #tableau-table td.changed select {
+    border-color : var(--color-status-red-brighter) !important;
+}
+.fusion-theme #tableau-table th.changed {
+    background : var(--color-status-red-brighter);
+}
+.fusion-theme #tableau-table td.changed,
+.fusion-theme #tableau-table td.changed > * {
+    background : var(--color-status-red-brighter) !important;
+}
+.fusion-theme #tableau-table td.changed select {
     border-color : var(--color-status-red-brighter) !important;
 }
 tr.match {
@@ -404,6 +415,14 @@ td.field-editable .picklist-actions {
 }
 #tableau-body .picklist {
     margin-top : 30px;
+}
+#tableau-body .table-field {
+    background : var(--color-surface-level-2);
+}
+#tableau-body textarea {
+    background : var(--color-surface-level-2);
+    font-size  : 12px;
+    width      : 100%;
 }
 
 
@@ -478,8 +497,8 @@ body.hidden-layer td.invisible {
     display         : flex;
     justify-content : space-between;
     padding         : 8px 12px 8px 24px;
-    line-height     : 38px;
-    margin-bottom   : 8px;
+    line-height     : 34px;
+    margin-bottom   : 1px;
 }
 #transitions-list > div > div {
     display : flex;
@@ -503,8 +522,8 @@ select.select-transition {
 /* ----------------------------------------------------------------------------- */
 #summary { display : block; }
 #summary-descriptor {
-    height      : 38px;
-    line-height : 38px;
+    height      : 34px;
+    line-height : 34px;
 }
 #summary-header  { padding-right : 24px; }
 #summary-content { border-width  : 24px; }

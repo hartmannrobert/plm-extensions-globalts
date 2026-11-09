@@ -24,25 +24,28 @@
 }
 #toggle {
     border-radius : 50%;
-    font-size     : 32px;
+    font-size     : 28px;
+    font-weight   : 200;
     position      : absolute;
-    top           : 78px;
+    top           : 108px;
     left          : calc(var(--width-side) + 160px - 22px);
     z-index       : 2;
 }
 #layout {
     border-radius : 50%;
-    font-size     : 28px;
+    font-size     : 24px;
+    font-weight   : 200;
     position      : absolute;
-    top           : 128px;
+    top           : 150px;
     left          : calc(var(--width-side) + 160px - 22px);
     z-index       : 2;
 }
 #start {
     border-radius : 50%;
-    font-size     : 28px;
+    font-size     : 24px;
+    font-weight   : 200;
     position      : absolute;
-    top           : 178px;
+    top           : 192px;
     left          : calc(var(--width-side) + 160px - 22px);
     z-index       : 2;
 }
@@ -142,6 +145,22 @@ body.layout-tiles-list .tile.min .tile-access .button {
 #side-toolbar > div > span {
     display : block;
     color   : var(--color-blue-500);
+}
+span.link,
+.toolbar .button span {
+    color : var(--color-blue-500);
+}
+span.block {
+    display : block;
+}
+.toolbar {
+    display : flex;
+    gap     : 4px;
+}
+.toolbar .button {
+    flex-grow : 1;
+    height    : 40px;
+    padding   : 6px 12px;
 }
 #themes {
     display         : flex;
@@ -376,6 +395,10 @@ h2 {
     border      : 1px solid var(--color-surface-level-4);
     max-width   : calc(100% - 2px);
 }
+.fusion-theme .instructions img {
+    border      : 1px solid var(--color-surface-level-4);
+    max-width   : calc(100% - 2px);
+}
 .tiles {
     justify-content : left;
     width           : calc(100% - 600px);
@@ -482,7 +505,6 @@ a:hover {
 /*  CHANGE LOG */
 /* ----------------------------------------------------------------------------- */
 #framework-changes { 
-    background  : var(--color-surface-level-2);
     color       : var(--color-font);
     display     : none; 
 }
